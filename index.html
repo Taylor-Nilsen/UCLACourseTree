@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DARS Skill Tree</title>
+<style>
+:root {
+  --bg: #f6f7f9; --card: #fff; --fg: #1b1d21; --muted: #6b7280; --line: #e1e4e8; --accent: #2563eb; --accent-fg: #fff;
+  --done: #16a34a; --done-bg: #dcfce7; --ip: #2563eb; --ip-bg: #dbeafe; --ready: #d97706; --ready-bg: #fffbeb;
+  --locked: #9ca3af; --locked-bg: #f3f4f6; --ph: #7c3aed; --ph-bg: #f3e8ff; --block: #dc2626; --edge: #c3c8d0;
+  --warn-bg: #fef3c7; --warn-fg: #92400e; --err-bg: #fee2e2; --err-fg: #991b1b;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111317; --card: #1a1d23; --fg: #e6e7ea; --muted: #9aa0aa; --line: #2d3139; --accent: #60a5fa; --accent-fg: #0b1220;
+    --done: #4ade80; --done-bg: #12351f; --ip: #60a5fa; --ip-bg: #132a4a; --ready: #fbbf24; --ready-bg: #2a2110;
+    --locked: #6b7280; --locked-bg: #22252b; --ph: #c084fc; --ph-bg: #2a1a40; --block: #f87171; --edge: #3d424c;
+    --warn-bg: #3a2c0b; --warn-fg: #fcd34d; --err-bg: #3b1515; --err-fg: #fca5a5;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; overflow-x: hidden; }
+body { background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+[hidden] { display: none !important; }
+button, input { font: inherit; color: inherit; }
+.muted { color: var(--muted); } .small { font-size: 12px; } .pad { padding: 16px; }
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 16px; background: var(--card); border-bottom: 1px solid var(--line); }
+.bar h1 { font-size: 16px; margin: 0 8px 0 0; }
+.btn { display: inline-flex; align-items: center; padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); cursor: pointer; white-space: nowrap; }
+.btn:hover { border-color: var(--accent); }
+.btn:focus-within, .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.btn.sm { padding: 3px 8px; font-size: 12px; }
+.ctl { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.ctl input[type=number] { width: 52px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); }
+#busy { font-size: 13px; color: var(--muted); }
+
+.error { margin: 12px 16px 0; padding: 10px 12px; border-radius: 8px; background: var(--err-bg); color: var(--err-fg); }
+.empty { max-width: 520px; margin: 12vh auto; padding: 0 16px; text-align: center; }
+.empty .row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin: 16px 0; }
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; padding: 12px 16px 0; }
+.stat { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; min-width: 0; }
+.stat span { display: block; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.stat b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.warnings { margin: 10px 16px 0; padding: 8px 12px 8px 28px; background: var(--warn-bg); color: var(--warn-fg); border-radius: 8px; font-size: 13px; }
+
+.layout { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 16px; padding: 12px 16px 24px; align-items: start; }
+@media (min-width: 801px) { .side { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; padding-right: 4px; } }
+@media (max-width: 800px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+.side { min-width: 0; }
+.side > summary { font-weight: 600; cursor: pointer; padding: 4px 0 8px; }
+.sec { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 14px 0 6px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
+.card.muted { opacity: .7; }
+.card.muted p { margin: 4px 0; }
+.card-h { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.card-h b { font-size: 13px; }
+.need { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.tk { font-size: 12px; color: var(--muted); }
+.opt { display: flex; align-items: baseline; gap: 6px; width: 100%; text-align: left; padding: 3px 6px; margin: 2px 0; border: 1px solid transparent; border-radius: 6px; background: none; cursor: pointer; font-size: 13px; }
+.opt:hover { border-color: var(--line); background: var(--bg); }
+.opt b { white-space: nowrap; flex: none; }
+.opt small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.opt.chosen, .opt.on { background: var(--ip-bg); }
+.pin { width: 12px; height: 12px; flex: none; color: var(--accent); align-self: center; }
+.alts summary { cursor: pointer; font-size: 12px; color: var(--accent); margin-top: 4px; }
+.filter { width: 100%; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); margin: 4px 0; }
+.optlist { max-height: 150px; overflow-y: auto; }
+.card p.small { margin: 4px 0; }
+
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 10px; }
+.tabs button { padding: 8px 14px; border: 0; border-bottom: 2px solid transparent; background: none; cursor: pointer; color: var(--muted); }
+.tabs button[aria-selected=true] { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
+.zoom { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; font-size: 12px; color: var(--muted); }
+.zoom button { width: 28px; height: 28px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); cursor: pointer; }
+.scroll { overflow: auto; height: 62vh; min-height: 320px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+#tree svg { display: block; }
+.edge { fill: none; stroke: var(--edge); stroke-width: 1.5; }
+.edge.block { stroke: var(--block); stroke-width: 2; }
+.node { cursor: pointer; }
+.node:focus { outline: none; }
+.node .box { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
+.node text { fill: var(--fg); }
+.node .code { font-weight: 700; font-size: 13px; }
+.node .ttl { font-size: 11px; fill: var(--muted); }
+.node .chip { fill: var(--bg); stroke: var(--line); }
+.node .chipt { font-size: 10px; fill: var(--fg); }
+.s-done .box { fill: var(--done-bg); stroke: var(--done); }
+.s-ip .box { fill: var(--ip-bg); stroke: var(--ip); }
+.s-ready .box { fill: var(--ready-bg); stroke: var(--ready); stroke-width: 2.5; }
+.node .rdy { fill: var(--ready); font-size: 10px; font-weight: 700; }
+.s-locked .box { fill: var(--locked-bg); stroke: var(--locked); stroke-dasharray: 5 4; }
+.s-locked .code { fill: var(--muted); }
+.s-placeholder .box { fill: var(--ph-bg); stroke: var(--ph); stroke-dasharray: 5 4; }
+.node.sel .box, .node:focus-visible .box { stroke: var(--accent); stroke-width: 3; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 14px; height: 10px; border-radius: 3px; border: 1.5px solid; vertical-align: -1px; margin-right: 4px; }
+.legend .s-done { background: var(--done-bg); border-color: var(--done); }
+.legend .s-ip { background: var(--ip-bg); border-color: var(--ip); }
+.legend .s-ready { background: var(--ready-bg); border-color: var(--ready); }
+.legend .s-locked { background: var(--locked-bg); border: 1.5px dashed var(--locked); }
+.legend .s-placeholder { background: var(--ph-bg); border: 1.5px dashed var(--ph); }
+.legend .blk { height: 0; border-width: 1px; border-color: var(--block); border-radius: 0; }
+
+.plan { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 8px; align-items: flex-start; }
+.term { flex: 0 0 210px; min-width: 0; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.term.late { border-color: var(--block); }
+.term-h { display: flex; justify-content: space-between; margin-bottom: 6px; }
+.term-h span { color: var(--muted); font-size: 12px; }
+.tag-late { display: inline-block; font-size: 11px; color: #fff; background: var(--block); border-radius: 10px; padding: 1px 8px; margin-bottom: 6px; }
+.pchip { display: block; width: 100%; text-align: left; padding: 6px 8px; margin-bottom: 6px; border: 1px solid var(--line); border-left-width: 4px; border-radius: 6px; background: var(--bg); cursor: pointer; }
+.pchip span { display: block; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pchip small { color: var(--muted); }
+.pchip.s-ready { border-left-color: var(--ready); } .pchip.s-locked { border-left-color: var(--locked); } .pchip.s-placeholder { border-left-color: var(--ph); }
+.pchip:hover { border-color: var(--accent); }
+
+.detail { position: fixed; top: 0; right: 0; bottom: 0; width: min(360px, 100vw); overflow-y: auto; background: var(--card); border-left: 1px solid var(--line); box-shadow: -6px 0 24px rgba(0,0,0,.15); padding: 16px; z-index: 10; }
+.detail h2 { margin: 0 32px 4px 0; font-size: 18px; }
+.detail h3 { font-size: 13px; margin: 14px 0 6px; }
+.detail dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 12px 0; }
+.detail dt { color: var(--muted); }
+.detail dd { margin: 0; }
+.detail a { color: var(--accent); }
+.close { position: absolute; top: 10px; right: 10px; width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); cursor: pointer; font-size: 18px; line-height: 1; }
+.prelist { margin: 0; padding-left: 18px; } .prelist li { margin-bottom: 4px; }
+.pre { white-space: nowrap; }
+.badge { font-style: normal; font-size: 11px; padding: 1px 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); }
+.badge.s-done { background: var(--done-bg); border-color: var(--done); } .badge.s-ip { background: var(--ip-bg); border-color: var(--ip); }
+.badge.s-ready { border-color: var(--ready); } .badge.s-locked { border-style: dashed; } .badge.s-placeholder { background: var(--ph-bg); border-color: var(--ph); }
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1>DARS Skill Tree</h1>
+  <label class="btn">Upload DARS PDF<input type="file" class="vh" accept=".pdf,application/pdf"></label>
+  <button class="btn" data-sample>Load sample audit</button>
+  <label class="ctl">courses per quarter <input type="number" id="pq" min="3" max="6" value="4"></label>
+  <label class="ctl"><input type="checkbox" id="summer"> use summer</label>
+  <span id="busy" aria-live="polite"></span>
+</header>
+<div id="error" class="error" role="alert" hidden></div>
+
+<section id="empty" class="empty" hidden>
+  <h2>Map your degree audit</h2>
+  <p class="muted">Upload the PDF of your UCLA DARS audit to see a prerequisite tree and a quarter-by-quarter plan. The file is read in your browser and never uploaded.</p>
+  <div class="row">
+    <label class="btn primary">Upload DARS PDF<input type="file" class="vh" accept=".pdf,application/pdf"></label>
+    <button class="btn" data-sample>Load sample audit</button>
+  </div>
+</section>
+
+<div id="app" hidden>
+  <div id="stats" class="stats"></div>
+  <ul id="warnings" class="warnings" hidden></ul>
+  <div class="layout">
+    <details id="reqs-wrap" class="side" open><summary>Requirements</summary><div id="reqs"></div></details>
+    <main>
+      <div class="tabs" role="tablist">
+        <button role="tab" data-tab="tree" aria-selected="true">Tree</button>
+        <button role="tab" data-tab="plan" aria-selected="false">Quarter plan</button>
+      </div>
+      <section id="tree-view">
+        <div class="zoom"><button data-zoom="-1" aria-label="Zoom out">−</button><span id="zoomv">100%</span><button data-zoom="1" aria-label="Zoom in">+</button></div>
+        <div id="tree" class="scroll"></div>
+        <div class="legend">
+          <span><i class="s-done"></i>done</span><span><i class="s-ip"></i>in progress</span><span><i class="s-ready"></i>ready now</span>
+          <span><i class="s-locked"></i>locked</span><span><i class="s-placeholder"></i>GE / elective slot</span><span><i class="blk"></i>blocking prerequisite</span>
+        </div>
+      </section>
+      <section id="plan-view" hidden><div id="plan" class="plan"></div></section>
+    </main>
+  </div>
+</div>
+<aside id="detail" class="detail" hidden></aside>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="courses.js"></script>
+<script src="parser.js"></script>
+<script src="model.js"></script>
+<script src="sample/dars-lines.js"></script>
+<script src="ui.js"></script>
+</body>
+</html>
