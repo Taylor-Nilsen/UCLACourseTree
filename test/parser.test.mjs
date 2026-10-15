@@ -15,7 +15,7 @@ t('header', () => {
 });
 t('taken courses and aliases', () => {
   assert.equal(r.taken['MAT SCI 104'].grade, 'IP');
-  assert.equal(r.taken['MECH&AE 101'].grade, 'B-');
+  assert.equal(r.taken['MECH&AE 101'].grade, 'P'); // sample has letter grades scrubbed
   assert.equal(r.taken['CHEM 20A'].via, 'CHEM T01');
   assert.ok(r.taken['MATH 31B']);
   assert.deepEqual(Object.keys(r.taken).filter(k => /MAT S CI|MECH& AE/.test(k)), []);
