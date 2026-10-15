@@ -10,7 +10,7 @@
   };
   if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-  const NW = 200, NH = 56, COLW = 230, ROWH = 74, PAD = 20;
+  const NW = 200, NH = 56, COLW = 340, ROWH = 110, PAD = 40;
   const STATUS = { done: 'Completed', ip: 'In progress', ready: 'Ready now', locked: 'Locked', placeholder: 'GE / elective slot' };
   const QTR = { F: 'Fall', W: 'Winter', S: 'Spring' };
   const PIN = '<svg class="pin" viewBox="0 0 16 16" aria-label="pinned"><path d="M10 1l5 5-2 1-3 3 .5 3.5L9 15l-3-3-4 4-1-1 4-4-3-3 1.5-1.5L7 6l3-3z" fill="currentColor"/></svg>';
