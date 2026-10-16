@@ -50,15 +50,15 @@ Export opens a print-ready plan and prerequisite tree; save it as PDF from the p
 
 ## Deploy
 
-GitHub Pages serves the site at https://skilltree.taylornilsen.com. `.github/workflows/pages.yml` runs the tests on every push to `main` and publishes only the app files (no tests, scripts, docs or raw sample data).
+GitHub Pages serves the site at https://uclacoursetree.taylornilsen.com. `.github/workflows/pages.yml` runs the tests on every push to `main` and publishes only the app files (no tests, scripts, docs or raw sample data).
 
 One-time setup:
 
-1. Repo Settings, Pages: set Source to "GitHub Actions" and Custom domain to `skilltree.taylornilsen.com`. Turn on Enforce HTTPS once the certificate is issued.
-2. DNS for taylornilsen.com (Cloudflare): a `CNAME` record `skilltree` pointing to `taylor-nilsen.github.io`, proxy off (DNS only), so GitHub can issue the HTTPS certificate.
+1. Repo Settings, Pages: set Source to "GitHub Actions" and Custom domain to `uclacoursetree.taylornilsen.com`. Turn on Enforce HTTPS once the certificate is issued.
+2. DNS for taylornilsen.com (Cloudflare): a `CNAME` record `uclacoursetree` pointing to `taylor-nilsen.github.io`, proxy off (DNS only), so GitHub can issue the HTTPS certificate.
 3. Recommended: verify `taylornilsen.com` under your GitHub profile Settings, Pages, so no other GitHub account can claim the subdomain.
 
-Pages on a private repo needs GitHub Pro (included with GitHub Education) and an account whose Actions billing is in good standing. If Actions jobs fail with "recent account payments have failed or your spending limit needs to be increased", fix it under Settings, Billing and licensing: clear any failed payment and set the Actions budget above $0.
+Pages is free on a public repo. A private repo needs GitHub Pro (included with GitHub Education) and an account whose Actions billing is in good standing.
 
 ## Data sources
 
