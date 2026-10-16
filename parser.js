@@ -48,6 +48,11 @@
 
   function parse(lines) {
     if (typeof lines === 'string') lines = lines.split('\n').map(l => ({ x: l.length - l.trimStart().length, line: l.trim() }));
+    // drop browser print chrome (page header/footer URLs)
+    lines = lines.filter(({ line }) => !/^\d+\/\d+\/\d+, \d+:\d\d [AP]M /.test(line) && !/^https:\/\/dars\.ucla\.edu/.test(line) && !/printerFriendly/.test(line));
+    // column positions differ by print margins: derive them from the most common x of NEEDS:/SELECT FROM: lines
+    const xs = {}; for (const l of lines) if (/^(NEEDS:|SELECT FROM:)/.test(l.line)) xs[l.x] = (xs[l.x] || 0) + 1;
+    const dataX = +Object.keys(xs).sort((a, b) => xs[b] - xs[a])[0] || 85;
     const res = { student: {}, taken: {}, sections: [], unitsNeeded: null, currentTerm: null };
     let section = null, group = null, mode = null, lastHeaderWasTop = false;
     const addTaken = (code, info) => { const prev = res.taken[code]; if (!prev || (prev.grade === 'IP' && info.grade !== 'IP')) res.taken[code] = Object.assign({}, prev, info); };
@@ -77,19 +82,21 @@
       }
       if ((m = /^(?:-> )?NOT FROM:\s*(.*)$/.exec(line))) { if (group) group._not = m[1]; mode = 'not'; continue; }
       if ((m = /^SELECT FROM:\s*(.*)$/.exec(line))) { if (group) group._sel = m[1]; mode = 'select'; continue; }
-      if ((mode === 'select' || mode === 'not') && group && (x >= 150 || /\d/.test(line)) && !/^[A-Z][A-Z &-]+$/.test(line)) { group[mode === 'select' ? '_sel' : '_not'] += ' ' + line; continue; }
+      if ((m = /^OR\) (.+)$/.exec(line)) && section) { mode = null; lastHeaderWasTop = false; group = { section: section.title, name: m[1], taken: [], options: [], notFrom: [], orPrev: true }; section.groups.push(group); continue; }
+      if ((mode === 'select' || mode === 'not') && group && (x > dataX + 10 || /\d/.test(line)) && !/^[A-Z][A-Z &-]+$/.test(line)) { group[mode === 'select' ? '_sel' : '_not'] += ' ' + line; continue; }
       mode = null;
       const isCaps = /^[A-Z0-9][A-Z0-9 &:;,'()\/!-]*$/.test(line) && /[A-Z]{3}/.test(line);
       if (!isCaps) { lastHeaderWasTop = false; continue; }
-      if (x < 70) { // top-level section header (may span two lines)
-        if (lastHeaderWasTop && section && !section.groups.length) { section.title += ' ' + line; continue; }
+      if (x < dataX - 10) { // top-level section header; further caps lines before the first group are notes
+        if (lastHeaderWasTop && section && !section.groups.length) { section.note = section.note ? section.note + ' ' + line : line; continue; }
         section = { title: line.trim(), groups: [], needSubgroups: null }; res.sections.push(section); group = null; lastHeaderWasTop = true; continue;
       }
       lastHeaderWasTop = false;
-      if (x < 100 && section && !/^(IN-PROG|GRADED|EARNED)/.test(line)) { group = { section: section.title, name: line, taken: [], options: [], notFrom: [] }; section.groups.push(group); }
+      if (x <= dataX + 2 && section && !/^(IN-PROG|GRADED|EARNED)/.test(line)) { const note = /GRADE REQUIRED|\.$/.test(line); group = { section: section.title, name: note ? section.title : line, taken: [], options: [], notFrom: [] }; if (note) group.note = line; section.groups.push(group); }
     }
     delete res._lastTaken;
     for (const s of res.sections) for (const gr of s.groups) {
+      if (/TECHNICAL BREADTH/.test(s.title) && gr.needCourses && !gr._sel && !gr.taken.length) gr.undeclared = true;
       if (gr._sel) gr.options = parseOptions(gr._sel, res.currentTerm);
       if (gr._not) gr.notFrom = parseOptions(gr._not, res.currentTerm).map(o => o.alts[0]);
       delete gr._sel; delete gr._not;

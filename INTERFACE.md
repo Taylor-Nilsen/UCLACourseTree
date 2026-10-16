@@ -12,13 +12,15 @@ already used in parser.js and courses.js.
 ```
 { student: { auditDate, expected: 'SP29', major }, currentTerm: 'FA26', unitsNeeded: 69,
   taken: { [code]: { term:'WI26', units:4, grade:'B'|'IP'|'AP'|'TA'|'P'..., title, via? } },
-  sections: [ { title, needSubgroups: number|null,
+  sections: [ { title, note?: string /* extra header lines */, needSubgroups: number|null,
       groups: [ { section, name, needCourses, needUnits, taken: string[], notFrom: string[],
+                  orPrev?: true /* "OR)" group: alternative to the previous group in the section */,
+                  undeclared?: true /* technical-breadth group with no SELECT FROM: student has not declared a TBA */,
                   options: [ { dept, num, alts: string[] /* 'MECH&AE 157','MECH&AE 157W' = one slot */, to?: '187' /* range */ } ] } ] } ] }
 ```
   Notes: a group whose `options` is empty is a "count check" (use only for warnings). Two groups in the same
   section with the same `name` are alternatives (pick one). `section.needSubgroups = k` means pick k of that
-  section's groups. GE groups have hundreds of options that are not in COURSES.
+  section's groups. A group with `orPrev: true` is an alternative to the group just before it. GE groups have hundreds of options that are not in COURSES.
 - `DARS.termIndex('WI27')` -> sortable int, `DARS.termName(int)` inverse. Quarter order FA, WI, SP, SU within an academic year.
 
 ## model.js must expose `window.MODEL.build(parsed, opts) -> model`

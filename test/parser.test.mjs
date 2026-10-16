@@ -59,4 +59,52 @@ t('parseOptions shape', () => {
   assert.deepEqual(DARS.parseOptions('ENGR 3(FA20-SU25)', 'FA26'), []);
 });
 t('termIndex', () => assert.equal(DARS.termIndex('WI27'), DARS.termIndex('FA26') + 1));
+
+// ---- sample 2: different print margins (headers x~88/112, data x~113), browser print chrome, OR) groups
+const r2 = DARS.parse(JSON.parse(readFileSync(new URL('../sample/dars-lines-2.json', import.meta.url), 'utf8')));
+const sec2 = s => r2.sections.find(x => x.title.startsWith(s));
+const grp2 = (s, g) => sec2(s).groups.find(x => x.name.startsWith(g));
+t('sample2 header and units check', () => {
+  assert.equal(r2.currentTerm, 'FA26'); assert.equal(r2.student.expected, 'SP28'); assert.equal(r2.unitsNeeded, 9);
+});
+t('sample2 lower division math', () => {
+  const g = sec2('LOWER DIVISION MATHEMATICS').groups[0]; assert.equal(g.needCourses, 1);
+  assert.deepEqual(g.options.map(o => o.alts), [['MATH 33B']]);
+});
+t('sample2 required courses, OR) capstone, no needSubgroups', () => {
+  const s = sec2('BIOENGINEERING REQUIRED COURSES'); assert.equal(s.needSubgroups, null);
+  assert.deepEqual(s.groups.map(g => [g.name, g.needCourses, g.options.length, !!g.orPrev]), [
+    ['EIGHT BIOENGINEERING UPPER DIVISION REQUIRED COURSES', 7, 7, false],
+    ['BIOENGINEERING CAPSTONE', 2, 2, false],
+    ['BIOENGINEERING CAPSTONE OPTION 2', 1, 1, true]]);
+});
+t('sample2 TBA: separate section, undeclared group', () => {
+  assert.ok(!r2.sections.some(s => /MAJOR FIELD ELECTIVES & TECHNICAL/.test(s.title)));
+  const s = sec2('SELECT THREE COURSES FROM ONE TECHNICAL BREADTH');
+  const g = s.groups[0]; assert.equal(g.needCourses, 3); assert.equal(g.needUnits, 12);
+  assert.equal(g.undeclared, true); assert.deepEqual(g.options, []);
+  const e = grp2('SELECT THREE COURSES', 'BIOENGINEERING SIX MAJOR FIELD ELECTIVES');
+  assert.equal(e.needCourses, 6); assert.equal(e.options.length, 29); assert.ok(!e.undeclared);
+  assert.ok(codes(e).includes('BIOENGR CM187') && codes(e).includes('BIOENGR C101')); // first and last continuation lines
+});
+t('sample2 ethics and residence', () => {
+  assert.equal(sec2('ENGINEERING ETHICS REQUIREMENT').groups[0].needCourses, 1);
+  assert.ok(codes(sec2('ENGINEERING ETHICS REQUIREMENT').groups[0]).includes('ENGR 188EW'));
+  assert.ok(sec2('HSSEAS'));
+});
+t('sample2 print chrome ignored', () => {
+  assert.ok(!r2.sections.some(s => /dars|printerFriendly|My Audit/i.test(s.title + (s.note || ''))));
+});
+t('sample2 taken courses', () => {
+  const k = Object.keys(r2.taken);
+  assert.ok(k.length >= 40 && k.length <= 50);
+  for (const c of ['BIOENGR 10', 'BIOENGR 100', 'PHYSICS 4AL', 'CHEM 30AL', 'CHEM 20A', 'MATH 32B']) assert.ok(r2.taken[c], c);
+  assert.equal(r2.taken['BIOENGR 100'].grade, 'IP'); assert.equal(r2.taken['PHYSICS 4AL'].grade, 'IP');
+  assert.equal(r2.taken['MATH 31A'].via, 'MATH T01');
+  assert.ok(!k.some(c => /BIOENGR10|PHYSICS4AL/.test(c)));
+});
+t('top-level caps lines go to note, not title', () => {
+  const x = DARS.parse([{ x: 10, line: 'FIRST HEADER LINE' }, { x: 10, line: 'SECOND HEADER LINE' }, { x: 30, line: 'GROUP ONE' }, { x: 30, line: 'NEEDS: 1 COURSE' }, { x: 30, line: 'SELECT FROM: MATH 31A' }]);
+  assert.equal(x.sections[0].title, 'FIRST HEADER LINE'); assert.equal(x.sections[0].note, 'SECOND HEADER LINE');
+});
 console.log(n + ' passed');
