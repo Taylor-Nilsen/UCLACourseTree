@@ -318,7 +318,7 @@
       ${g && !g.placeholder && (g.choice || (g.altGroupKeys || []).length) ? `<p><a href="#" data-group="${esc(g.key)}">All options for this requirement</a></p>` : ''}
       <h3>Prerequisites</h3>${pre ? `<ul class="prelist">${pre}</ul>` : '<p class="muted">None</p>'}
       ${n.status === 'placeholder' ? '<p class="muted small">Pick a specific course for this slot in the requirements panel.</p>' : ''}
-      ${n.note ? `<h3>Note</h3><p>${esc(n.note)}</p>` : ''}`;
+      ${n.note ? `<h3>Note</h3><p>${esc(n.note)}</p>` : ''}${n.req ? `<h3>Catalog requisites</h3><p>${esc(n.req)}</p>` : ''}`;
     d.hidden = false;
   }
 

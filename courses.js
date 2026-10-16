@@ -76,5 +76,10 @@
   };
   // Courses the DARS lists under a different id that mean the same thing for prereq purposes.
   const ALIAS = { 'MATH T03': 'MATH 31B', 'CHEM T01': 'CHEM 20A' };
-  g.COURSES = C; g.ALIAS = ALIAS;
+  // Merge with the UCLA-wide catalog database (data/ucla-courses.js). Catalog prereqs win; the hand-entered
+  // entries above only contribute what the catalog lacks: quarters offered (2026-27 MAE schedule), notes, rec.
+  const U = (typeof module !== 'undefined' ? require('./data/ucla-courses.js').UCLA_COURSES : g.UCLA_COURSES) || {};
+  const ALL = Object.assign({}, U);
+  for (const [k, c] of Object.entries(C)) ALL[k] = U[k] ? Object.assign({}, U[k], { off: c.off, note: c.note, rec: c.rec, w2: c.w2 || U[k].w2 }) : c;
+  g.COURSES = ALL; g.ALIAS = ALIAS;
 })(typeof module !== 'undefined' ? module.exports : window);

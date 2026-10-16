@@ -109,7 +109,7 @@ t('pin a GE placeholder option becomes a real node', () => {
   const g = grp(m, 'HISTORICAL'), code = g.options[0];
   const mm = MODEL.build(parsed, { choices: { [g.key]: [code] } });
   const nd = mm.nodes.find(x => x.code === code);
-  assert.equal(nd.units, 4); assert.deepEqual(nd.prereqs, []); assert.ok(nd.planned);
+  assert.equal(nd.units, COURSES[code] ? COURSES[code].u : 4); assert.ok(nd.planned); // catalog data when the course is known
   assert.ok(!mm.nodes.some(x => x.code === 'GE: HISTORICAL ANALYSIS'));
 });
 t('stats', () => {

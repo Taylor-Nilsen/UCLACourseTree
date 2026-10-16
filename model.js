@@ -4,14 +4,23 @@
   const env = typeof module !== 'undefined' ? Object.assign({}, require('./courses.js'), require('./parser.js')) : g;
   const { COURSES, ALIAS, DARS } = env;
   const EW = /ETHICS|WRITING/;
+  // GE-style lists (hundreds of options) stay as searchable slots in their own area instead of choice nodes
+  const BIGLIST = /FOUNDATIONS OF|GENERAL EDUCATION|\bGE\b|DIVERSITY|WRITING II|ENGINEERING WRITING|QUANTITATIVE REASONING|FOREIGN LANGUAGE|LANGUAGE REQUIREMENT/;
   const numOf = n => parseInt(String(n).replace(/^\D+/, ''), 10);
   const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
 
   function build(parsed, opts = {}) {
     const per = opts.perQuarter || 4, choices = opts.choices || {}, warnings = [];
-    // done/ip, with aliases (MATH T03 -> MATH 31B)
-    const taken = Object.assign({}, parsed.taken);
-    for (const [c, t] of Object.entries(parsed.taken)) if (ALIAS[c] && !taken[ALIAS[c]]) taken[ALIAS[c]] = Object.assign({}, t, { via: c });
+    // done/ip only (failed, withdrawn, incomplete attempts do not count), with aliases (MATH T03 -> MATH 31B)
+    const st = t => t.status || (t.grade === 'IP' ? 'ip' : 'done');
+    const taken = {};
+    for (const [c, t] of Object.entries(parsed.taken)) if (['done', 'ip'].includes(st(t))) taken[c] = t;
+    for (const [c, t] of Object.entries(taken)) if (ALIAS[c] && !taken[ALIAS[c]]) taken[ALIAS[c]] = Object.assign({}, t, { via: c });
+    // ranges and wildcards ("PSYCH 110 TO 199", "PSYCH 1@@") expand against every course table loaded
+    const table = Object.keys(Object.assign({}, env.UCLA_COURSES || {}, COURSES)).map(k => [k, DARS.splitCode(k)]).filter(x => x[1]);
+    const wildRe = w => /^@*$/.test(w) ? /./ : new RegExp('^' + w.replace(/[^@\d]/g, '').replace(/@/g, '\\d') + '$');
+    const expand = o => { const n = numOf, re = o.wildcard && wildRe(o.wildcard);
+      return table.filter(([, sc]) => sc.dept === o.dept && (re ? re.test(String(n(sc.num))) : n(sc.num) >= n(o.num) && n(sc.num) <= n(o.to))).map(x => x[0]); };
     const chosenBy = new Map(); // code -> groupKey that plans it
 
     // count checks: compare against the itemized groups of the section right before
@@ -29,13 +38,13 @@
         if (!gr.options.length && !gr.undeclared) return;
         const slots = [], all = [];
         for (const o of gr.options) {
-          const codes = o.to ? Object.keys(COURSES).filter(k => { const sc = DARS.splitCode(k); return sc.dept === o.dept && numOf(sc.num) >= numOf(o.num) && numOf(sc.num) <= numOf(o.to); }) : o.alts;
+          const codes = o.to || o.wildcard ? expand(o) : o.alts;
           all.push(...codes);
-          if (o.to) codes.forEach(c => slots.push([c])); else if (codes.length) slots.push(codes);
+          if (o.to || o.wildcard) codes.forEach(c => slots.push([c])); else if (codes.length) slots.push(codes);
         }
         const options = [...new Set(all)];
         const out = { key: s.title + '|' + gr.name + '|' + i, section: s.title, name: gr.name, need: gr.needCourses, taken: gr.taken,
-          chosen: [], alternatives: [], placeholder: !gr.undeclared && !all.some(c => COURSES[c]), choice: false, undeclared: !!gr.undeclared, undecided: false, optionCount: options.length, options, selected: true, altGroupKeys: [],
+          chosen: [], alternatives: [], placeholder: !gr.undeclared && (BIGLIST.test(s.title) || options.length > 60 || !all.some(c => COURSES[c])), choice: false, undeclared: !!gr.undeclared, undecided: false, optionCount: options.length, options, selected: true, altGroupKeys: [],
           _slots: slots, _notFrom: gr.notFrom, _orPrev: !!gr.orPrev, _ew: EW.test(s.title), _writing: /WRITING/.test(s.title),
           _slotUnits: gr.needUnits && gr.needCourses ? gr.needUnits / gr.needCourses : 4 };
         sec.push(out); groups.push(out);
@@ -87,7 +96,12 @@
         warnings.push(`${gr.section}: no technical breadth area is declared, so the plan holds ${plural(k, 'open slot')}. Declare one at my.engineering.ucla.edu and re-export the audit.`);
         return;
       }
-      if (gr.placeholder) {
+      // ethics/writing: a course already required elsewhere that is on this list satisfies it outright (e.g. 157W for Writing II)
+      const already = gr._ew ? gr.options.filter(c => chosenBy.has(c) && chosenBy.get(c) !== gr.key && !pins.includes(c)).slice(0, k) : [];
+      if (already.length && already.length >= k) {
+        for (const c of already) gr.chosen.push({ code: c, auto: true, why: `already required for ${nameOf(chosenBy.get(c))}; it is on this list, so it counts here too` });
+        gr.placeholder = false;
+      } else if (gr.placeholder) {
         for (let i = 1; i <= k; i++) gr.chosen.push({ code: 'GE: ' + gr.name + (k > 1 ? ' #' + i : ''), auto: true, why: 'Pick any approved course from this list; the plan holds a slot for it.' });
       } else {
         // viable = not excluded, not already used (ethics/writing may double count), not known to be never offered
@@ -151,9 +165,9 @@
     const add = (code, extra) => {
       if (nodes.has(code)) return;
       const c = COURSES[code], t = taken[code];
-      nodes.set(code, Object.assign({ code, title: c ? c.t : t ? t.title : code, units: c ? c.u : t ? t.units : 4, offered: c ? c.off : '?', prereqs: c ? c.pre : [] }, c && c.note ? { note: c.note } : {}, extra));
+      nodes.set(code, Object.assign({ code, title: c ? c.t : t ? t.title : code, units: c ? c.u : t ? t.units : 4, offered: c ? c.off : '?', prereqs: c ? c.pre : [] }, c && c.note ? { note: c.note } : {}, c && c.req && !c.pre.length ? { req: c.req } : {}, extra));
     };
-    for (const [code, t] of Object.entries(taken)) if (!ALIAS[code]) add(code, { status: t.grade === 'IP' ? 'ip' : 'done', term: t.term });
+    for (const [code, t] of Object.entries(taken)) if (!ALIAS[code]) add(code, { status: st(t), term: t.term });
     for (const gr of groups) if (gr.selected) for (const c of gr.chosen) {
       if (c.code.startsWith('GE: ')) add(c.code, { title: gr.name, units: gr._slotUnits, offered: 'FWS', status: 'placeholder', groupKey: gr.key });
       else add(c.code, { groupKey: chosenBy.get(c.code) || gr.key });
@@ -205,7 +219,7 @@
     return {
       currentTerm: parsed.currentTerm, expectedTerm: parsed.student.expected, warnings, groups,
       nodes: [...nodes.values()], edges, plan,
-      stats: { unitsEarned: Object.values(parsed.taken).filter(x => x.grade !== 'IP' && !x.via).reduce((u, x) => u + x.units, 0),
+      stats: { unitsEarned: Object.values(parsed.taken).filter(x => st(x) === 'done' && !x.via).reduce((u, x) => u + x.units, 0),
         unitsNeeded: parsed.unitsNeeded, plannedUnits, coursesRemaining: plan.reduce((n, p) => n + p.courses.length, 0) },
     };
   }
