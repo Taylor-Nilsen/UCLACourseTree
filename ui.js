@@ -2,7 +2,7 @@
 
 // Tree layering (pure, also loaded by the Node tests). An undecided path choice is one card (node `PATH: <key>`); nodes of
 // its paths (a path already taken while more picks are pending) fold into it. Layer = longest prereq chain; a card sits
-// where the last course of its slowest path would sit. Once decided there is no card: the taken paths' courses are
+// at the earliest column any of its paths allows (where the last course of its fastest path would sit). Once decided there is no card: the taken paths' courses are
 // ordinary nodes, layered like any other.
 (function (g) {
   const cardOf = (n, pcs) => {
@@ -26,7 +26,7 @@
       visiting.add(c);
       const pc = card[c];
       const v = !pc ? (preds[c].length ? 1 + Math.max(...preds[c].map(L)) : 0)
-        : Math.max(0, ...pc.paths.map(p => {
+        : Math.min(...pc.paths.map(p => {
           const cl = {};
           for (const x of p.chain || []) cl[x.code] = Math.max(0, ...x.pre.map(f).filter(q => q in preds && q !== c).map(q => L(q) + 1), ...x.after.map(q => (cl[q] || 0) + 1));
           return Math.max(0, ...Object.values(cl));
@@ -291,7 +291,7 @@
     const cpos = {};
     let maxX = Math.max(PAD + NW, ...Object.values(pos).map(p => p.x + p.w));
     for (const g of cgroups) {
-      const li = Math.max(0, ...choiceOpts(g).map(o => optL(o.code, new Set())));
+      const ls = choiceOpts(g).map(o => optL(o.code, new Set())), li = ls.length ? Math.min(...ls) : 0; // earliest option's column
       const y = colY[li] || PAD, x = PAD + li * COLW;
       cpos[g.key] = { x, y, h: choiceHeight(g) };
       colY[li] = y + cpos[g.key].h + 30;

@@ -226,12 +226,13 @@ t('choosing path 1: no capstone card; 177A/177B are normal nodes with real prere
   assert.ok(nodes.some(n => n.code === 'BIOENGR 177A') && nodes.some(n => n.code === 'BIOENGR 177B'));
   assert.ok(edges.some(e => e.from === 'BIOENGR 177A' && e.to === 'BIOENGR 177B'), 'internal 177A -> 177B is drawn');
 });
-t('clearing the capstone choice brings back exactly one path node, sitting as late as the slowest path', () => {
+t('clearing the capstone choice brings back exactly one path node, at the earliest column a path allows', () => {
   const u = MODEL.build(p2, { perQuarter: 4, choices: {} });
   assert.equal(capNode(u).length, 1);
   assert.ok(!u.nodes.some(n => n.fromPath));
   const lay = L(u).layer;
-  assert.equal(lay['PATH: ' + cap.key], Math.max(lay['BIOENGR 167L'], lay['BIOENGR 176']) + 2); // one right of where 177A would sit
+  assert.equal(lay['PATH: ' + cap.key], 0); // 177C has no prereqs, so the card can sit in the first column
+  assert.ok(lay['PATH: ' + cap.key] < Math.max(lay['BIOENGR 167L'], lay['BIOENGR 176']) + 1, 'earlier than where the 177A path would put it');
 });
 t('choosing path 1 plans 177A before 177B and drops 177C and the slot', () => {
   const a = pick(0);
