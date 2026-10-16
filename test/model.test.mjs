@@ -269,4 +269,52 @@ t('sample 1: the two ENGINEERING ETHICS groups are one path choice: a list of it
   assert.ok(!mm.nodes.some(n => n.code === 'PATH: ' + pc.key));
   assert.equal(mm.nodes.find(n => n.code === 'CHOOSE: ENGINEERING ETHICS').fromPath, pc.key);
 });
+// ---- exclusive picks: a course pinned for one requirement is no option anywhere else
+const codesOf = g => g.options.concat(g.alternatives.map(a => a.code), g.chosen.filter(c => !c.auto).map(c => c.code)); // chips = pins + alternatives
+t('a MAT SCI course pinned in the TBA group is offered nowhere else; its node carries pickedFor', () => {
+  const tba = grp(m, 'MATERIALS SCIENCE'), c = tba.alternatives[0].code;
+  assert.match(c, /^MAT SCI /);
+  const mm = MODEL.build(parsed, { choices: { [tba.key]: [c] } });
+  assert.deepEqual(mm.groups.find(g => g.key === tba.key).chosen.map(x => [x.code, x.auto]), [[c, false]]);
+  for (const g of mm.groups) if (g.key !== tba.key) assert.ok(!codesOf(g).includes(c), g.name);
+  assert.equal(mm.nodes.find(x => x.code === c).pickedFor, tba.key);
+  const sp = grp(m, 'ONE COURSE FROM THE SPACE'), s1 = sp.alternatives[0].code;
+  assert.equal(MODEL.build(parsed, { choices: { [sp.key]: [s1] } }).nodes.find(x => x.code === s1).pickedFor, sp.key);
+  assert.ok(!m.nodes.some(x => x.pickedFor), 'no pins, no pickedFor');
+});
+const shared = synth([['A', 1, [zz('ZZ 10'), zz('ZZ 11'), zz('ZZ 12')]], ['B', 1, [zz('ZZ 12'), zz('ZZ 13'), zz('ZZ 14')]]]);
+const sk = MODEL.build(shared, {}), kA = sk.groups[0].key, kB = sk.groups[1].key;
+t('a pin in a later group removes the course from an earlier group; unpinning restores it', () => {
+  assert.ok(codesOf(sk.groups[0]).includes('ZZ 12') && sk.groups[0].alternatives.some(a => a.code === 'ZZ 12'));
+  const mm = MODEL.build(shared, { choices: { [kB]: ['ZZ 12'] } }), [a, b] = mm.groups;
+  assert.ok(!codesOf(a).includes('ZZ 12'), codesOf(a).join()); assert.deepEqual(a.alternatives.map(x => x.code), ['ZZ 10', 'ZZ 11']);
+  assert.deepEqual(chosen(b), ['ZZ 12']); assert.equal(mm.nodes.find(x => x.code === 'ZZ 12').pickedFor, kB);
+  const back = MODEL.build(shared, { choices: {} }).groups[0]; // unpinned: it is an option of A again
+  assert.ok(back.options.includes('ZZ 12') && back.alternatives.some(x => x.code === 'ZZ 12'));
+  // swapping B's pick to ZZ 13 returns ZZ 12 to A
+  const sw = MODEL.build(shared, { choices: { [kB]: ['ZZ 13'] } });
+  assert.ok(sw.groups[0].alternatives.some(x => x.code === 'ZZ 12'));
+});
+t('the same course pinned in two groups: the first group in document order keeps it, with a warning naming both', () => {
+  const mm = MODEL.build(shared, { choices: { [kB]: ['ZZ 12'], [kA]: ['ZZ 12'] } }), [a, b] = mm.groups;
+  assert.deepEqual(chosen(a), ['ZZ 12']); assert.deepEqual(chosen(b), []); assert.ok(b.undecided);
+  assert.ok(!codesOf(b).includes('ZZ 12'));
+  assert.ok(mm.warnings.some(w => w.includes('ZZ 12') && w.includes(' A ') && w.includes(' B;')), mm.warnings.join('\n'));
+});
+t('ethics/writing: an EW course pinned for ethics satisfies writing automatically and is not offered there', () => {
+  const eth = m.groups.find(g => g.name === 'ENGINEERING ETHICS' && g.choice), wr = grp(m, 'ENGINEERING WRITING');
+  const ew = eth.alternatives.map(a => a.code).find(c => /EW$/.test(c) && wr.options.includes(c));
+  assert.ok(ew);
+  const mm = MODEL.build(parsed, { choices: { [eth.key]: [ew] } }), w = mm.groups.find(g => g.key === wr.key);
+  assert.deepEqual(w.chosen, [{ code: ew, auto: true, why: 'picked for engineering ethics; it is on this list, so it counts here too' }]);
+  assert.ok(!w.options.includes(ew) && !w.alternatives.some(a => a.code === ew));
+  assert.ok(!mm.nodes.some(n => n.code.startsWith('CHOOSE: ENGINEERING WRITING') || n.code.startsWith('GE: ENGINEERING WRITING')));
+  const nd = mm.nodes.find(n => n.code === ew);
+  assert.equal(nd.pickedFor, eth.key); assert.equal(nd.fromPath, eth.key); // picked inside a taken list path
+  assert.equal(planned(mm).filter(c => c === ew).length, 1);
+  // the other way round: picked for writing, on the ethics list -> ethics (a path choice) is taken and satisfied by it
+  const m3 = MODEL.build(parsed, { choices: { [wr.key]: [ew] } }), e3 = m3.groups.find(g => g.key === eth.key);
+  assert.ok(e3.selected && !e3.undecided); assert.match(e3.chosen[0].why, /^picked for engineering writing/);
+  assert.ok(!m3.nodes.some(n => n.code.startsWith('CHOOSE: ENGINEERING ETHICS') || (n.status === 'path' && n.title === 'ENGINEERING ETHICS')));
+});
 console.log(n + ' passed');

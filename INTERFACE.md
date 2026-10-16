@@ -68,6 +68,7 @@ model = {
             term?: 'WI26' /* when taken */, planned?: 'WI27', groupKey?, offered: string /* COURSES off; the plan only uses these quarters */, req?: string /* catalog text when pre is [] */,
             pathChoiceKey? /* PATH node and path CHOOSE slot */, pathPrereq?: true /* needed only by an undecided path: not planned */,
             fromPath?: string /* pathChoice key: this course / slot belongs to a taken path of a decided path choice */,
+            pickedFor?: string /* groupKey: the user pinned this course in that selected choice group (pick N of M, or a taken list path) */,
             prereqs: string[][] }],
   edges: [{ from, to }],            // prerequisite -> course, only between nodes present
   plan:  [{ term: 'WI27', courses: string[], units: number, beyondExpected: boolean }],
@@ -77,8 +78,16 @@ model = {
 Group key: `section + '|' + name + '|' + index` (stable across rebuilds).
 
 ### Selection rules (the model never picks between real options for the user)
-- `viable` options of a group = options minus `notFrom`, minus taken courses, minus courses already used by another
-  requirement (ethics/writing groups may reuse them), minus courses with `off === ''`. Courses not in COURSES and
+- **Exclusive picks.** Before any group is processed the model maps every pinned course to the group it is pinned in
+  (`pickedBy`; pins in an `A OR B` sub-group, key `<parent key>|...`, belong to the parent). A course picked in one
+  group is dropped from every other group's `options` (and so from `alternatives`, choice chips, panels, path options
+  and GE search lists), whatever the document order. If the same course is pinned in two groups, the first group in
+  document order keeps it, the other pin is ignored and a warning names both groups. Exception: an ethics/writing group
+  whose list holds a course picked elsewhere is satisfied by it automatically (`auto: true`, why `picked for <group>;
+  it is on this list, so it counts here too`), before courses merely required elsewhere; such a group inside a path
+  choice counts as taken. The UI also removes a course from other groups' pins when it is pinned.
+- `viable` options of a group = options minus `notFrom`, minus taken courses, minus courses picked for another group,
+  minus courses already used by another requirement (ethics/writing groups may reuse them), minus courses with `off === ''`. Courses not in COURSES and
   `off === '?'` stay viable. An option like "32A OR 32AH" is one slot; alts with `off === ''` are dropped from it.
 - `viable <= need`: every viable slot is chosen, `auto: true`, `why` starts `required: N of N` (plus e.g.
   `MATH 32A not offered recently`). Fewer than needed adds the warning "audit lists fewer options than it needs".
@@ -130,5 +139,8 @@ locked = otherwise; placeholder = GE/elective slot or pending choice; path = a p
 codes: `GE: <group name>`, `CHOOSE: <group name>`, `CHOOSE: <path choice title>: <summaries>`.
 
 `opts.choices[groupKey]` pins: kept up to `need` per group (UI drops the oldest); a pin must be one of the group's
-`options`. Pinning in an alternative group selects that group (the UI also records it as the taken path).
+`options`. A pinned course of a selected choice group carries `pickedFor`; the UI tags its box "pick · <group name>"
+with a ⇄ button (`aria-label="Change pick for <group name>"`) that opens that group's option panel (it does not unpin),
+and the course detail shows "Picked for: <group name>" with a "Change pick" button to the same panel. The panel says
+"N more to pick" while slots are open, and which pin a new pick replaces once the group is full. Pinning in an alternative group selects that group (the UI also records it as the taken path).
 `opts.choices['path:' + pathChoiceKey]`: group keys of the taken paths, at most `pick` (UI drops the oldest).

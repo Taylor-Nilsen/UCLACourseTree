@@ -48,16 +48,29 @@
         const options = [...new Set(all)].filter(c => !notFrom.has(c)); // NOT FROM courses are never offered
         const out = { key: s.title + '|' + gr.name + '|' + i, section: s.title, name: gr.name, need: gr.needCourses, taken: gr.taken,
           chosen: [], alternatives: [], placeholder: !gr.undeclared && (BIGLIST.test(s.title) || options.length > 60 || !all.some(c => COURSES[c])), choice: false, undeclared: !!gr.undeclared, undecided: false, optionCount: options.length, options, selected: true, altGroupKeys: [],
-          _slots: slots, _notFrom: [...notFrom], _orPrev: !!gr.orPrev, _ew: EW.test(s.title), _writing: /WRITING/.test(s.title),
+          _slots: slots, _notFrom: [...notFrom], _all: options, _orPrev: !!gr.orPrev, _ew: EW.test(s.title), _writing: /WRITING/.test(s.title),
           _slotUnits: gr.needUnits && gr.needCourses ? gr.needUnits / gr.needCourses : 4 };
         sec.push(out); groups.push(out);
       });
       if (sec.length) bySection.push({ s, sec });
     }
+    const gName = key => (groups.find(x => x.key === key) || { name: key.split('|').pop() }).name; // a sub-group key may not exist yet
+    const nameOf = key => gName(key).toLowerCase();
+    // exclusive picks: a course pinned for one requirement is no option anywhere else, whatever the document order.
+    // Pins in "A OR B" sub-groups (key = parent key + '|...') belong to their parent. A course pinned twice keeps its first pin.
+    const pickedBy = new Map(), own = (gr, k) => k === gr.key || k.startsWith(gr.key + '|');
+    for (const gr of groups) for (const [k, cs] of Object.entries(choices)) if (own(gr, k)) for (const c of cs) {
+      if (!gr.options.includes(c)) continue;
+      const was = pickedBy.get(c);
+      if (!was) pickedBy.set(c, k);
+      else if (was !== k) warnings.push(`${c} was picked for both ${gName(was)} and ${gName(k)}; it is kept for ${gName(was)} only.`);
+    }
+    const pickedElse = (gr, c) => pickedBy.has(c) && !own(gr, pickedBy.get(c));
+    for (const gr of groups) { gr.options = gr.options.filter(c => !pickedElse(gr, c)); gr.optionCount = gr.options.length; }
     const writingGroups = groups.filter(x => x._writing);
     const writingOpen = () => writingGroups.some(w => !w.chosen.length && !(choices[w.key] || []).length);
     // "ready" = every prereq is done, in progress or pinned (not merely planned)
-    const pinned = new Set(Object.values(choices).flat());
+    const pinned = new Set(pickedBy.keys());
     const met = c => !!taken[c] || pinned.has(c);
 
     // unmet transitive prereqs; OR-groups take the cheapest alternative
@@ -72,7 +85,6 @@
       }
       return out;
     }
-    const nameOf = key => groups.find(x => x.key === key).name.toLowerCase();
     const cmpCode = (a, b) => { const x = DARS.splitCode(a) || { dept: a, num: '' }, y = DARS.splitCode(b) || { dept: b, num: '' }; return x.dept.localeCompare(y.dept) || (numOf(x.num) || 0) - (numOf(y.num) || 0) || a.localeCompare(b); };
     // overlap info only (ethics/writing double counting); never used to choose
     function extras(code, gr) {
@@ -91,7 +103,7 @@
     const byReadiness = (a, b) => b.ready - a.ready || a._k - b._k || a.unmet - b.unmet || cmpCode(a.code, b.code);
 
     function choose(gr) {
-      const pins = (choices[gr.key] || []).filter(c => gr.options.includes(c));
+      const pins = (choices[gr.key] || []).filter(c => gr.options.includes(c) && pickedBy.get(c) === gr.key);
       gr.chosen = pins.map(c => ({ code: c, auto: false, why: gr.placeholder ? 'pinned by you' : 'pinned by you; ' + facts(c, gr).why }));
       const k = Math.max(0, gr.need - pins.length);
       if (gr.undeclared) { // TBA not declared yet: nothing to list, but the plan must still hold the courses
@@ -99,16 +111,20 @@
         warnings.push(`${gr.section}: no technical breadth area is declared, so the plan holds ${plural(k, 'open slot')}. Declare one at my.engineering.ucla.edu and re-export the audit.`);
         return;
       }
-      // ethics/writing: a course already required elsewhere that is on this list satisfies it outright (a lab that also counts for Writing II)
-      const already = gr._ew ? gr.options.filter(c => chosenBy.has(c) && chosenBy.get(c) !== gr.key && !pins.includes(c)).slice(0, k) : [];
+      // ethics/writing: a course picked or already required elsewhere that is on this list satisfies it outright
+      // (a lab that also counts for Writing II); picks first. A course picked elsewhere is never offered here.
+      const already = gr._ew ? gr._all.filter(c => !pins.includes(c) && (pickedElse(gr, c) || chosenBy.has(c) && chosenBy.get(c) !== gr.key))
+        .sort((a, b) => pickedElse(gr, b) - pickedElse(gr, a)).slice(0, k) : [];
       if (already.length && already.length >= k) {
-        for (const c of already) gr.chosen.push({ code: c, auto: true, why: `already required for ${nameOf(chosenBy.get(c))}; it is on this list, so it counts here too` });
+        for (const c of already) gr.chosen.push({ code: c, auto: true, why: pickedElse(gr, c) ? `picked for ${nameOf(pickedBy.get(c))}; it is on this list, so it counts here too`
+          : `already required for ${nameOf(chosenBy.get(c))}; it is on this list, so it counts here too` });
+        gr._byPick = already.some(c => pickedElse(gr, c));
         gr.placeholder = false;
       } else if (gr.placeholder) {
         for (let i = 1; i <= k; i++) gr.chosen.push({ code: 'GE: ' + gr.name + (k > 1 ? ' #' + i : ''), auto: true, why: 'Pick any approved course from this list; the plan holds a slot for it.' });
       } else {
         // viable = not excluded, not already used (ethics/writing may double count), not known to be never offered
-        const ok = c => !gr._notFrom.includes(c) && !taken[c] && (gr._ew || !chosenBy.has(c));
+        const ok = c => !gr._notFrom.includes(c) && !taken[c] && !pickedElse(gr, c) && (gr._ew || !chosenBy.has(c));
         const never = c => COURSES[c] && COURSES[c].off === '';
         const slots = gr._slots.filter(sl => !sl.some(c => pins.includes(c)))
           .map(sl => ({ v: sl.filter(c => ok(c) && !never(c)), off: sl.filter(c => ok(c) && never(c)) })).filter(sl => sl.v.length);
@@ -146,7 +162,7 @@
       const key = set[0].key, keys = set.map(x => x.key);
       // explicit path pick first, then groups the user pinned a course in
       const want = (choices['path:' + key] || []).filter(gk => keys.includes(gk));
-      const pinnedIn = set.filter(x => (choices[x.key] || []).some(c => x.options.includes(c))).map(x => x.key);
+      const pinnedIn = set.filter(x => x._byPick || [...pickedBy.values()].some(k => own(x, k))).map(x => x.key);
       const pickedKeys = [...new Set(want.concat(pinnedIn))].slice(0, k), pickedSet = set.filter(x => pickedKeys.includes(x.key));
       for (const x of set) {
         x.selected = pickedSet.includes(x);
@@ -200,7 +216,7 @@
     for (const [code, t] of Object.entries(taken)) if (!viaSrc.has(code) && !(t.via && !COURSES[code])) add(code, { status: st(t), term: t.term });
     for (const gr of groups) if (gr.selected) for (const c of gr.chosen) {
       if (c.code.startsWith('GE: ')) add(c.code, { title: gr.name, units: gr._slotUnits, offered: 'FWS', status: 'placeholder', groupKey: gr.key });
-      else add(c.code, { groupKey: chosenBy.get(c.code) || gr.key });
+      else add(c.code, { groupKey: pickedBy.get(c.code) || chosenBy.get(c.code) || gr.key });
     }
     // pending decisions hold their units in the plan; scheduled like GE slots
     const slot = (code, title, units, groupKey, extra) => { let c = code, i = 2; while (nodes.has(c)) c = code + ' (' + i++ + ')'; add(c, Object.assign({ title, units, offered: 'FWS', status: 'placeholder', groupKey, prereqs: [] }, extra)); };
@@ -217,6 +233,8 @@
     const open = pc => pc.chosenPaths.length < pc.pick;
     for (const pc of pathChoices) if (!open(pc)) for (const n of nodes.values())
       if (n.groupKey && !n.pathChoiceKey && pc.chosenPaths.some(k => n.groupKey === k || n.groupKey.startsWith(k + '|'))) n.fromPath = pc.key;
+    // a course the user picked in a pick-N-of-M group (or a taken list path): the UI offers "change pick" on it
+    for (const n of nodes.values()) { const g = groups.find(x => x.key === pickedBy.get(n.code)); if (g && g.choice && g.selected) n.pickedFor = g.key; }
     const before = new Set(nodes.keys());
     for (const pc of pathChoices.filter(open)) {
       const pre = new Map();

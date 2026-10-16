@@ -268,7 +268,7 @@
   // Choice nodes go under the column of their most advanced option; GE slots and GE path cards get a lane at the bottom.
   function layout(all, edges, cgroups, lane, pchoices, gecards) {
     const { layer, nodes, edges: te, preds } = TREE_LAYOUT.layers(all, edges, pchoices);
-    const boxW = n => n.status === 'path' ? PW : NW, boxH = n => n.status === 'path' ? pathHeight(pcByKey(n.pathChoiceKey)) : n.fromPath ? NH + TAGH : NH;
+    const boxW = n => n.status === 'path' ? PW : NW, boxH = n => n.status === 'path' ? pathHeight(pcByKey(n.pathChoiceKey)) : NH + TAGH * (!!n.fromPath + !!n.pickedFor);
     const cols = [];
     nodes.forEach(n => (cols[layer[n.code]] = cols[layer[n.code]] || []).push(n));
     const row = {}, pos = {}, colY = [];
@@ -319,9 +319,13 @@
 
   const choiceRows = g => Math.ceil(Math.min(choiceOpts(g).length, MAXCHIPS + 1) / 2);
   const choiceHeight = g => 32 + choiceRows(g) * 24 + 6 + (takenPathOf(g.key) ? TAGH : 0);
+  // tag row "label  ⇄" at y inside a box
+  const tagRow = (label, attrs, aria, w, y) => `<rect class="ptag" x="8" y="${y}" width="${w - 16}" height="18" rx="9"/><text class="ptagt" x="16" y="${y + 13}">${esc(trunc(label, Math.floor((w - 70) / 6)))}</text>
+    <g class="pbtn" ${attrs} transform="translate(${w - 38},${y})" tabindex="0" role="button" aria-label="${esc(aria)}"><title>${esc(aria)}</title><rect width="30" height="18" rx="9"/><text x="15" y="13" text-anchor="middle">⇄</text></g>`;
   // "path · TITLE  ⇄" inside a box that came from a taken path; ⇄ clears the path choice (the card comes back)
-  const pathTag = (pc, w, h) => `<rect class="ptag" x="8" y="${h - 24}" width="${w - 16}" height="18" rx="9"/><text class="ptagt" x="16" y="${h - 11}">path · ${esc(trunc(pc.title, Math.floor((w - 70) / 6) - 7))}</text>
-    <g class="pbtn" data-change="${esc(pc.key)}" transform="translate(${w - 38},${h - 24})" tabindex="0" role="button" aria-label="${esc('Change path for ' + pc.title)}"><title>${esc('Change path for ' + pc.title)}</title><rect width="30" height="18" rx="9"/><text x="15" y="13" text-anchor="middle">⇄</text></g>`;
+  const pathTag = (pc, w, h) => tagRow('path · ' + pc.title, `data-change="${esc(pc.key)}"`, 'Change path for ' + pc.title, w, h - 24);
+  // "pick · GROUP  ⇄" on a course picked in a pick-N-of-M group; ⇄ opens that group's options (it does not unpin)
+  const pickTag = (g, w, y) => tagRow('pick · ' + g.name, `data-group="${esc(g.key)}"`, 'Change pick for ' + g.name, w, y);
   function choiceSvg(g, p) {
     const opts = choiceOpts(g), shown = opts.length > MAXCHIPS + 1 ? opts.slice(0, MAXCHIPS) : opts, more = opts.length - shown.length;
     const top = 32;
@@ -386,14 +390,14 @@
     }).join('');
     const ns = nodes.filter(n => n.status !== 'path').concat(lane).map(n => {
       const p = pos[n.code], chip = n.planned || n.term || '', ready = n.status === 'ready', pinned = n.groupKey && isPinned(n.groupKey, n.code);
-      const cw = chip ? chip.length * 6.2 + 12 : 0, label = n.code.startsWith('CHOOSE: ') ? 'choose: ' + n.title : n.code, fp = n.fromPath && pcByKey(n.fromPath);
+      const cw = chip ? chip.length * 6.2 + 12 : 0, label = n.code.startsWith('CHOOSE: ') ? 'choose: ' + n.title : n.code, fp = n.fromPath && pcByKey(n.fromPath), pf = n.pickedFor && groupByKey(n.pickedFor);
       return `<g class="node s-${esc(n.status)}${S.detail === n.code ? ' sel' : ''}" data-node="${esc(n.code)}" transform="translate(${p.x},${p.y})" tabindex="0" role="button" aria-label="${esc(n.code + ', ' + (STATUS[n.status] || n.status) + (pinned ? ', pinned' : ''))}">
         <title>${esc(n.code + ' — ' + n.title)}</title><rect class="box" width="${NW}" height="${p.h}" rx="8"/>
         ${pinned ? `<path class="pinp" transform="translate(8,10) scale(.8)" d="${PIN_D}"/>` : ''}
         <text class="code" x="${pinned ? 24 : 10}" y="22">${esc(trunc(label, Math.floor((NW - cw - (pinned ? 32 : 18)) / 7.8)))}</text>
         <text class="ttl" x="10" y="42">${esc(trunc(n.title, ready ? 20 : n.status === "placeholder" ? 27 : 31))}</text>${ready ? `<text class="rdy" x="${NW - 10}" y="42" text-anchor="end">ready now</text>` : ''}
         ${chip ? `<rect class="chip" x="${NW - cw - 8}" y="9" width="${cw}" height="17" rx="8.5"/><text class="chipt" x="${NW - 8 - cw / 2}" y="21" text-anchor="middle">${esc(chip)}</text>` : ''}
-        ${fp ? pathTag(fp, NW, p.h) : ''}
+        ${pf ? pickTag(pf, NW, p.h - 24 - (fp ? TAGH : 0)) : ''}${fp ? pathTag(fp, NW, p.h) : ''}
       </g>`;
     }).join('');
     const cs = cgroups.map(g => choiceSvg(g, cpos[g.key])).join('') + pcs().filter(pc => pos['PATH: ' + pc.key]).map(pc => pathSvg(pc, pos['PATH: ' + pc.key], nm)).join('');
@@ -429,14 +433,19 @@
       const c = course(o.code) || {}, pre = preHtml(c.pre, nm);
       return `<div class="optd${o.pinned ? ' on' : ''}"><div class="optd-h">${o.pinned ? PIN : `<i class="dot${o.ready ? ' ok' : ''}" title="${o.ready ? 'prereqs met' : 'prereqs missing'}"></i>`}
         <b>${nm[o.code] ? `<a href="#" data-node="${esc(o.code)}">${esc(o.code)}</a>` : esc(o.code)}</b><span class="muted small">${esc(c.u ?? '?')} u</span>
-        <button class="btn sm" data-act="${o.pinned ? 'unpin' : 'pin'}" data-key="${esc(g.key)}" data-code="${esc(o.code)}">${o.pinned ? 'Unpin' : 'Pin'}</button></div>
+        <button class="btn sm" data-act="${o.pinned ? 'unpin' : 'pin'}" data-key="${esc(g.key)}" data-code="${esc(o.code)}">${o.pinned ? 'Unpin' : 'Pick'}</button></div>
         <div class="small">${esc(c.t || 'Not in the course database')}</div>
         <div class="small muted">Offered: ${esc(offeredText(o.code))}</div>
         ${pre ? `<ul class="prelist small">${pre}</ul>` : `<div class="small muted">${c.t ? 'No prerequisites' : 'Prerequisites unknown'}</div>`}
+        ${c.req ? `<div class="small muted">Catalog: ${esc(c.req)}</div>` : ''}
         ${o.why ? `<div class="small muted">${esc(o.why)}</div>` : ''}</div>`;
     }).join('');
+    // open slots, or which pin a new pick replaces (pin() drops the oldest)
+    const mine = S.opts.choices[g.key] || [], left = g.need - g.chosen.filter(c => !c.auto).length;
+    const slots = !g.choice || g.undeclared ? '' : left > 0 ? `<p class="small"><b>${esc(left)} more to pick</b></p>`
+      : `<p class="small"><b>${g.need === 1 ? 'Picked.' : `All ${esc(g.need)} picked.`}</b> Picking another option replaces ${esc(mine[0] || 'your oldest pick')}, your oldest pick.</p>`;
     return `<button class="close" data-close aria-label="Close">×</button>
-      <h2>${esc(pickLabel(g))}</h2><p>${esc(g.name)}<br><small class="muted">${esc(g.section)}</small></p>
+      <h2>${esc(pickLabel(g))}</h2><p>${esc(g.name)}<br><small class="muted">${esc(g.section)}</small></p>${slots}
       ${takenPathOf(g.key) ? partOf(takenPathOf(g.key)) : ''}
       ${g.selected === false && pcOfGroup(g.key) ? `<p class="small">One path of ${esc(pcOfGroup(g.key).title)}. Pinning an option here takes this path. <a href="#" data-path="${esc(pcOfGroup(g.key).key)}">Compare paths</a></p>` : ''}
       <p class="small muted">Green dot: prerequisites done, in progress or pinned. Grey: something is still missing.</p>${rows}`;
@@ -473,6 +482,7 @@
     d.innerHTML = `<button class="close" data-close aria-label="Close">×</button>
       <h2>${pinned ? PIN + ' ' : ''}${esc(n.code)}</h2><p>${esc(n.title)}</p>
       ${n.fromPath && takenPathOf(n.groupKey) ? partOf(takenPathOf(n.groupKey)) : ''}
+      ${n.pickedFor && groupByKey(n.pickedFor) ? `<p class="small">Picked for: ${esc(groupByKey(n.pickedFor).name)} <button class="btn sm" data-group="${esc(n.pickedFor)}">Change pick</button></p>` : ''}
       ${pinned ? `<p><button class="btn sm" data-act="unpin" data-key="${esc(g.key)}" data-code="${esc(n.code)}">Unpin</button></p>` : ''}
       <dl><dt>Status</dt><dd><i class="badge s-${esc(n.status)}">${esc(STATUS[n.status] || n.status)}</i></dd>
       <dt>Units</dt><dd>${esc(n.units)}</dd>
@@ -498,6 +508,11 @@
     const g = groupByKey(key); if (!g) return;
     const a = (S.opts.choices[key] || []).filter(c => c !== code); a.push(code);
     while (a.length > Math.max(1, g.need || 1)) a.shift();
+    // a course counts for one pick only: drop it from every other group's pins
+    for (const k of Object.keys(S.opts.choices)) if (k !== key && !k.startsWith('path:')) {
+      const r = S.opts.choices[k].filter(c => c !== code);
+      if (r.length) S.opts.choices[k] = r; else delete S.opts.choices[k];
+    }
     S.opts.choices[key] = a;
     // pinning inside a path that is not taken takes that path
     const pc = g.selected === false && pcOfGroup(key);
