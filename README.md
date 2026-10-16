@@ -50,10 +50,15 @@ Export opens a print-ready plan and prerequisite tree; save it as PDF from the p
 
 ## Deploy
 
-The site is static files with no build step. Two ways to host it:
+GitHub Pages serves the site at https://skilltree.taylornilsen.com. `.github/workflows/pages.yml` runs the tests on every push to `main` and publishes only the app files (no tests, scripts, docs or raw sample data).
 
-- **Cloudflare (recommended).** `wrangler.jsonc` serves the repo as static assets; `.assetsignore` keeps tests, scripts, docs and git data private. In the Cloudflare dashboard go to Workers & Pages, choose Create, then Import a repository, and pick this repo with no build command. Every push to `main` redeploys. Add a custom domain under the Worker's Settings, Domains & Routes; Cloudflare creates the DNS record when the domain's DNS is on Cloudflare.
-- **GitHub Pages.** `.github/workflows/pages.yml` runs the tests and publishes on every push to `main`. It needs GitHub Actions to run on the repo, so a private repo needs a plan with Actions minutes and Pages for private repos, and a billing account in good standing.
+One-time setup:
+
+1. Repo Settings, Pages: set Source to "GitHub Actions" and Custom domain to `skilltree.taylornilsen.com`. Turn on Enforce HTTPS once the certificate is issued.
+2. DNS for taylornilsen.com (Cloudflare): a `CNAME` record `skilltree` pointing to `taylor-nilsen.github.io`, proxy off (DNS only), so GitHub can issue the HTTPS certificate.
+3. Recommended: verify `taylornilsen.com` under your GitHub profile Settings, Pages, so no other GitHub account can claim the subdomain.
+
+Pages on a private repo needs GitHub Pro (included with GitHub Education) and an account whose Actions billing is in good standing. If Actions jobs fail with "recent account payments have failed or your spending limit needs to be increased", fix it under Settings, Billing and licensing: clear any failed payment and set the Actions budget above $0.
 
 ## Data sources
 
