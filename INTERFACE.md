@@ -56,11 +56,13 @@ model = {
   pathChoices: [{ key /* = first group's key */, section, title, pick: number /* k */,
                   paths: [{ groupKey, name, courses: string[] /* codes the path adds; [] for an unpinned choice/GE path */,
                             units, choice: boolean /* the path is itself a pick-N-of-M list */, need, placeholder: boolean,
-                            ready: boolean, unmet: number, summary: string /* "BIOENGR 177A + 177B" | "pick 1 of 11 (ETHICS list)" */ }],
+                            ready: boolean, unmet: number, summary: string /* "BIOENGR 177A + 177B" | "pick 1 of 11 from ETHICS list" */,
+                            chain: [{ code, pre: string[] /* its prereqs present as nodes, outside the path */,
+                                      after: string[] /* courses of the same path it requires */ }] /* courses in prereq order */ }],
                   chosenPaths: string[] /* group keys */ }],
-  nodes: [{ code, title, units, status: 'done'|'ip'|'ready'|'locked'|'placeholder'|'option',
+  nodes: [{ code, title, units, status: 'done'|'ip'|'ready'|'locked'|'placeholder'|'path',
             term?: 'WI26' /* when taken */, planned?: 'WI27', groupKey?, offered: string, note?: string,
-            pathChoiceKey?, pathGroupKey? /* option nodes; pathChoiceKey also on a path CHOOSE slot */,
+            pathChoiceKey? /* PATH node and path CHOOSE slot */, pathPrereq?: true /* needed only by an undecided path: not planned */,
             prereqs: string[][] }],
   edges: [{ from, to }],            // prerequisite -> course, only between nodes present
   plan:  [{ term: 'WI27', courses: string[], units: number, beyondExpected: boolean }],
@@ -89,7 +91,7 @@ Group key: `section + '|' + name + '|' + index` (stable across rebuilds).
   by a pin inside it. While fewer than k are taken, every other group in the set is `selected: false, undecided: true`
   and contributes nothing to the plan; the plan holds one slot per missing pick, named
   `CHOOSE: <title>[ #i]: <path summary> or <path summary>` over the paths not taken (units of the smallest of them,
-  `pathChoiceKey` set), and each such path's `courses` appear as `option` nodes. Once k are taken the rest are
+  `pathChoiceKey` set); untaken paths' courses are not nodes. Once k are taken the rest are
   `selected: false, undecided: false` and add no nodes. The UI taking a path drops pins in the paths it leaves.
   `title` = the common leading words of the path names when there are 2 or more ("BIOENGINEERING CAPSTONE"), else
   the section title. A path's `ready` = every course's prereqs done/in progress/pinned (choice path: its best
@@ -101,12 +103,19 @@ Each open slot of a selected choice group is a node `CHOOSE: <group name>[ #i]` 
 `groupKey`, units = needUnits/need or 4, no prereqs). A path-choice `CHOOSE: <title>: A or B` slot carries
 `pathChoiceKey` and the `groupKey` of the first path not taken. These, like `GE:` slots, are scheduled last in the
 plan so unit totals stay honest. The UI draws non-GE `CHOOSE:` slots as one choice node per undecided selected group
-and one path node per path choice instead, and puts GE groups' nodes (and GE path choices' slots) in a separate
+outside any path choice, and draws each path choice as its PATH node's card, and puts GE groups' nodes (and GE path choices' slots) in a separate
 "General Education" lane.
-Option nodes (`status: 'option'`): courses of a path not taken yet. Never planned (no `planned`), not in `plan` or
-`stats`, and they pull in no prereq nodes; edges from prereqs already present are listed.
+Path nodes: one per path choice, code `PATH: <pathChoice.key>`, `status: 'path'`, `pathChoiceKey`, title = the path
+choice title. Its `prereqs` are the prereq AND-groups of the relevant paths' courses (undecided: every path; decided: the
+taken ones) minus groups met inside the same path (177A for 177B), so `edges` run from those prereqs into it. Prereqs
+not otherwise in the tree are added (transitively) with `pathPrereq: true` and are never planned. Path nodes are never
+planned and are not in `plan` or `stats`. Taken paths' courses (and a taken list path's `CHOOSE:`/`GE:` slots) stay
+ordinary planned nodes with `groupKey` = the path's group; the UI folds them into the path card
+(`TREE_LAYOUT.cardOf`) and places the card from `paths[].chain`: each path's last course sits one layer right of its
+latest external prereq plus its internal chain; the card takes the max over the relevant paths (`TREE_LAYOUT.layers`
+in ui.js, also loadable from Node). GE path choices (every path a placeholder) are drawn as the same card in the GE lane.
 Node status: done = taken with a passing grade (`status: done`); ip = in progress; failed, withdrawn and incomplete attempts count as not taken; ready = every prereq AND-group has a done/ip member;
-locked = otherwise; placeholder = GE/elective slot or pending choice; option = on an untaken path. Placeholder node
+locked = otherwise; placeholder = GE/elective slot or pending choice; path = a path choice card. Placeholder node
 codes: `GE: <group name>`, `CHOOSE: <group name>`, `CHOOSE: <path choice title>: <summaries>`.
 
 `opts.choices[groupKey]` pins: kept up to `need` per group (UI drops the oldest); a pin must be one of the group's

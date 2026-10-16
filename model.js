@@ -168,7 +168,7 @@
         const rest = x.name.split(' ').slice(n).join(' ') || x.name.split(' ').pop();
         return { groupKey: x.key, name: x.name, courses, units: groupUnits(x), choice, need: x.need, placeholder: x.placeholder,
           ready: !um, unmet: um,
-          summary: choice ? `pick ${x.need} of ${x.placeholder ? x.optionCount : x.chosen.length + x.alternatives.length} (${rest} list)` : joinCodes(courses) };
+          summary: choice ? `pick ${x.need} of ${x.placeholder ? x.optionCount : x.chosen.length + x.alternatives.length} from ${rest} list` : joinCodes(courses) };
       });
       pathChoices.push({ key, section: sTitle, title, pick: k, paths, chosenPaths: pickedSet.map(x => x.key) });
       const rest = set.filter(x => !x.selected), units = Math.min(...rest.map(groupUnits));
@@ -198,7 +198,7 @@
       nodes.set(code, Object.assign({ code, title: c ? c.t : t ? t.title : code, units: c ? c.u : t ? t.units : 4, offered: c ? c.off : '?', prereqs: c ? c.pre : [] }, c && c.note ? { note: c.note } : {}, c && c.req && !c.pre.length ? { req: c.req } : {}, extra));
     };
     const viaSrc = new Set(Object.values(taken).map(t => t.via).filter(Boolean));
-    for (const [code, t] of Object.entries(taken)) if (!ALIAS[code] && !viaSrc.has(code)) add(code, { status: st(t), term: t.term });
+    for (const [code, t] of Object.entries(taken)) if (!ALIAS[code] && !viaSrc.has(code) && !(t.via && !COURSES[code])) add(code, { status: st(t), term: t.term });
     for (const gr of groups) if (gr.selected) for (const c of gr.chosen) {
       if (c.code.startsWith('GE: ')) add(c.code, { title: gr.name, units: gr._slotUnits, offered: 'FWS', status: 'placeholder', groupKey: gr.key });
       else add(c.code, { groupKey: chosenBy.get(c.code) || gr.key });
@@ -207,20 +207,39 @@
     const slot = (code, title, units, groupKey, extra) => { let c = code, i = 2; while (nodes.has(c)) c = code + ' (' + i++ + ')'; add(c, Object.assign({ title, units, offered: 'FWS', status: 'placeholder', groupKey, prereqs: [] }, extra)); };
     for (const gr of groups) if (gr.undecided && gr.selected) for (let i = 1; i <= gr._open; i++) slot('CHOOSE: ' + gr.name + (gr._open > 1 ? ' #' + i : ''), gr.name, gr._slotUnits, gr.key);
     for (const a of altSlots) slot(a.code, a.title, a.units, a.groupKey, { pathChoiceKey: a.pathChoiceKey });
-    const stack = [...nodes.keys()].filter(c => !taken[c]);
-    while (stack.length) for (const grp of nodes.get(stack.pop()).prereqs) {
+    const pull = stack => { while (stack.length) for (const grp of nodes.get(stack.pop()).prereqs) {
       const m = grp.find(x => nodes.has(x)) || grp[0];
       if (!nodes.has(m)) { add(m, {}); stack.push(m); }
+    } };
+    pull([...nodes.keys()].filter(c => !taken[c]));
+    // one PATH node per path choice; its prereqs = prereqs of the relevant paths' courses from outside the path
+    // (undecided: every path; decided: the taken ones). Prereqs only an undecided path needs are added but not planned.
+    const open = pc => pc.chosenPaths.length < pc.pick, relevant = pc => pc.paths.filter(p => open(pc) || pc.chosenPaths.includes(p.groupKey));
+    const before = new Set(nodes.keys());
+    for (const pc of pathChoices) {
+      const pre = new Map();
+      for (const p of relevant(pc)) for (const c of p.courses) for (const grp of (COURSES[c] || { pre: [] }).pre)
+        if (!grp.some(x => p.courses.includes(x))) pre.set(grp.join('|'), grp);
+      add('PATH: ' + pc.key, { title: pc.title, units: Math.min(...pc.paths.map(p => p.units)), offered: '', status: 'path', pathChoiceKey: pc.key, prereqs: [...pre.values()] });
     }
-    // undecided paths: their courses are shown (status option) but never planned, and pull in no prereqs
-    for (const pc of pathChoices) if (pc.chosenPaths.length < pc.pick) for (const p of pc.paths) if (!pc.chosenPaths.includes(p.groupKey))
-      for (const c of p.courses) add(c, { status: 'option', pathChoiceKey: pc.key, pathGroupKey: p.groupKey });
+    pull(pathChoices.map(pc => 'PATH: ' + pc.key));
+    for (const n of nodes.values()) if (!before.has(n.code) && n.status !== 'path') n.pathPrereq = true;
     for (const n of nodes.values()) if (!n.status) n.status = n.prereqs.every(grp => grp.some(x => taken[x])) ? 'ready' : 'locked';
     const edges = [];
     for (const n of nodes.values()) for (const grp of n.prereqs) for (const p of grp) if (nodes.has(p)) edges.push({ from: p, to: n.code });
+    // each path's courses in prerequisite order: pre = prereqs present as nodes, after = courses of the same path
+    for (const pc of pathChoices) for (const p of pc.paths) {
+      const seen = new Set(), visit = c => {
+        if (seen.has(c)) return; seen.add(c);
+        const ps = (COURSES[c] || { pre: [] }).pre.flat(), after = ps.filter(x => x !== c && p.courses.includes(x));
+        after.forEach(visit);
+        p.chain.push({ code: c, pre: [...new Set(ps.filter(x => !p.courses.includes(x) && nodes.has(x)))], after });
+      };
+      p.chain = []; p.courses.forEach(visit);
+    }
 
     // plan
-    const todo = [...nodes.values()].filter(n => !taken[n.code] && n.status !== 'option');
+    const todo = [...nodes.values()].filter(n => !taken[n.code] && n.status !== 'path' && !n.pathPrereq);
     let real = todo.filter(n => n.status !== 'placeholder');
     const slots = todo.filter(n => n.status === 'placeholder');
     for (const n of real) if (n.offered === '') warnings.push(`${n.code} is not offered in 2025-27, so the plan can't schedule it.`);

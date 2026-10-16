@@ -5,6 +5,7 @@ const require = createRequire(import.meta.url);
 const { DARS } = require('../parser.js');
 const { COURSES } = require('../courses.js');
 const { MODEL } = require('../model.js');
+const { TREE_LAYOUT } = require('../ui.js');
 const parsed = DARS.parse(JSON.parse(readFileSync(new URL('../sample/dars-lines.json', import.meta.url), 'utf8')));
 const m = MODEL.build(parsed, { perQuarter: 4 });
 const grp = (mm, n) => mm.groups.find(g => g.name.startsWith(n) && g.selected !== false) || mm.groups.find(g => g.name.startsWith(n));
@@ -157,42 +158,67 @@ t('sample 2: the 7 required upper-division courses are planned whatever the caps
   }
   assert.ok(req.every(c => SEVEN.includes(c) || p2.taken[c]), req.join());
 });
-t('sample 2 undecided: one CHOOSE slot naming both paths; 177A/B/C are option nodes, not planned', () => {
+const capNode = mm => mm.nodes.filter(n => n.status === 'path' && n.pathChoiceKey === cap.key);
+t('sample 2 undecided: one CHOOSE slot naming both paths; one path node; no option nodes; 177A/B/C not nodes or planned', () => {
   const slots = planned(m2).filter(c => c.startsWith('CHOOSE: BIOENGINEERING CAPSTONE'));
   assert.equal(slots.length, 1); assert.ok(slots[0].includes('177A + 177B') && slots[0].includes('177C'), slots[0]);
   const sl = m2.nodes.find(n => n.code === slots[0]); assert.equal(sl.pathChoiceKey, cap.key); assert.equal(sl.units, 8);
-  for (const c of ['BIOENGR 177A', 'BIOENGR 177B', 'BIOENGR 177C']) {
-    const nd = m2.nodes.find(n => n.code === c);
-    assert.equal(nd.status, 'option'); assert.equal(nd.planned, undefined); assert.equal(nd.pathChoiceKey, cap.key); assert.ok(nd.pathGroupKey);
-    assert.ok(!planned(m2).includes(c));
-  }
-  assert.ok(m2.edges.some(e => e.from === 'BIOENGR 177A' && e.to === 'BIOENGR 177B'), 'prereq edges into option nodes render');
-});
-t('option nodes are excluded from stats', () => {
-  const opt = m2.nodes.filter(n => n.status === 'option');
-  assert.ok(opt.length);
+  assert.ok(!m2.nodes.some(n => n.status === 'option'));
+  assert.deepEqual(capNode(m2).map(n => n.code), ['PATH: ' + cap.key]);
+  for (const c of ['BIOENGR 177A', 'BIOENGR 177B', 'BIOENGR 177C']) { assert.ok(!m2.nodes.some(n => n.code === c), c); assert.ok(!planned(m2).includes(c)); }
+  assert.ok(!planned(m2).some(c => c.startsWith('PATH: ')));
   assert.equal(m2.stats.coursesRemaining, planned(m2).length);
-  assert.equal(m2.stats.plannedUnits, m2.plan.reduce((u, p) => u + p.units, 0));
-  assert.ok(!m2.plan.some(p => p.courses.some(c => opt.some(o => o.code === c))));
 });
-t('choosing path 1 plans 177A before 177B and drops 177C and the slot; path 2 plans 177C only', () => {
-  const [a, b] = cap.paths.map(p => MODEL.build(p2, { choices: { ['path:' + cap.key]: [p.groupKey] } }));
+t('sample 2 undecided: each path exposes its per-course prereq chain; prereqs of every path have edges into the card', () => {
+  assert.deepEqual(cap.paths.map(p => p.chain), [
+    [{ code: 'BIOENGR 177A', pre: ['BIOENGR 167L', 'BIOENGR 176'], after: [] }, { code: 'BIOENGR 177B', pre: [], after: ['BIOENGR 177A'] }],
+    [{ code: 'BIOENGR 177C', pre: [], after: [] }]]);
+  const into = m2.edges.filter(e => e.to === 'PATH: ' + cap.key).map(e => e.from).sort();
+  assert.deepEqual(into, ['BIOENGR 167L', 'BIOENGR 176']);
+});
+const pick = i => MODEL.build(p2, { choices: { ['path:' + cap.key]: [cap.paths[i].groupKey] } });
+t('choosing path 2 plans 177C (not a standalone tree node: it folds into the card); 177A/B are neither planned nor nodes', () => {
+  const b = pick(1), nd = b.nodes.find(n => n.code === 'BIOENGR 177C');
+  assert.ok(planned(b).includes('BIOENGR 177C')); assert.ok(!b.nodes.some(n => /BIOENGR 177[AB]/.test(n.code)));
+  assert.equal(TREE_LAYOUT.cardOf(nd, b.pathChoices), 'PATH: ' + cap.key);
+  const { nodes } = TREE_LAYOUT.layers(b.nodes, b.edges, b.pathChoices);
+  assert.ok(!nodes.some(n => n.code === 'BIOENGR 177C')); assert.equal(capNode(b).length, 1);
+  assert.ok(!planned(b).some(c => c.startsWith('CHOOSE: BIOENGINEERING CAPSTONE')));
+});
+t('choosing path 1 plans 177A before 177B and drops 177C and the slot', () => {
+  const a = pick(0);
   const term = (mm, c) => { const p = mm.plan.find(q => q.courses.includes(c)); return p && DARS.termIndex(p.term); };
   assert.ok(term(a, 'BIOENGR 177A') < term(a, 'BIOENGR 177B'));
   assert.ok(COURSES['BIOENGR 177B'].pre.some(og => og.includes('BIOENGR 177A')));
-  assert.ok(!a.nodes.some(n => n.code === 'BIOENGR 177C')); assert.ok(!a.nodes.some(n => n.status === 'option'));
+  assert.ok(!a.nodes.some(n => n.code === 'BIOENGR 177C'));
   assert.ok(!planned(a).some(c => c.startsWith('CHOOSE: BIOENGINEERING CAPSTONE')));
   assert.deepEqual(a.pathChoices.find(pc => pc.key === cap.key).chosenPaths, [cap.paths[0].groupKey]);
-  assert.ok(term(b, 'BIOENGR 177C')); assert.ok(!b.nodes.some(n => /BIOENGR 177[AB]/.test(n.code)));
-  assert.ok(!planned(b).some(c => c.startsWith('CHOOSE: BIOENGINEERING CAPSTONE')));
+});
+t('tree layout: the capstone card sits late while undecided, at column 0 for 177C, late again for 177A + 177B', () => {
+  const L = mm => TREE_LAYOUT.layers(mm.nodes, mm.edges, mm.pathChoices).layer;
+  const k = 'PATH: ' + cap.key, u = L(m2), c = L(pick(1)), ab = L(pick(0));
+  assert.ok(u[k] > 0); assert.equal(u[k], Math.max(u['BIOENGR 167L'], u['BIOENGR 176']) + 2); // one right of where 177A would sit
+  assert.equal(c[k], 0);
+  assert.ok(ab[k] > 0); assert.equal(ab[k], u[k]);
+  assert.ok(!TREE_LAYOUT.layers(pick(0).nodes, pick(0).edges, pick(0).pathChoices).edges.some(e => /177/.test(e.from)), 'internal 177A -> 177B is not an edge');
+});
+t('a prereq only an undecided path needs is added as a node but not planned', () => {
+  const o = c => ({ dept: c.split(' ')[0], num: c.split(' ')[1], alts: [c] });
+  const p = { student: { expected: 'SP29' }, currentTerm: 'FA26', unitsNeeded: 0, taken: {}, sections: [
+    { title: 'S', needSubgroups: null, groups: [{ name: 'CAP', needCourses: 2, taken: [], notFrom: [], options: [o('BIOENGR 177A'), o('BIOENGR 177B')] },
+      { name: 'CAP', needCourses: 1, taken: [], notFrom: [], options: [o('BIOENGR 177C')] }] }] };
+  const mm = MODEL.build(p, {}), n176 = mm.nodes.find(n => n.code === 'BIOENGR 176');
+  assert.ok(n176 && n176.pathPrereq); assert.equal(n176.planned, undefined); assert.ok(!planned(mm).includes('BIOENGR 176'));
+  assert.ok(mm.edges.some(e => e.from === 'BIOENGR 176' && e.to.startsWith('PATH: ')));
 });
 t('sample 1: the two ENGINEERING ETHICS groups are one path choice: an 11-option list or ENGR 2', () => {
   const pc = m.pathChoices.find(x => x.title === 'ENGINEERING ETHICS');
   assert.equal(pc.paths.length, 2);
   const list = pc.paths.find(p => p.choice), e2 = pc.paths.find(p => !p.choice);
   assert.ok(list && e2); assert.deepEqual(e2.courses, ['ENGR 2']); assert.deepEqual(list.courses, []);
-  assert.match(list.summary, /^pick 1 of 11 /);
-  assert.equal(m.nodes.find(n => n.code === 'ENGR 2').status, 'option');
+  assert.equal(list.summary, 'pick 1 of 11 from ETHICS list');
+  assert.ok(!m.nodes.some(n => n.code === 'ENGR 2'));
+  assert.ok(m.nodes.some(n => n.code === 'PATH: ' + pc.key && n.status === 'path'));
   assert.ok(planned(m).some(c => c.startsWith('CHOOSE: ENGINEERING ETHICS:') && c.includes('pick 1 of 11') && c.includes('ENGR 2')));
   // picking the list path selects that group and leaves its own pick-1 slot
   const mm = MODEL.build(parsed, { choices: { ['path:' + pc.key]: [list.groupKey] } });

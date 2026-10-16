@@ -55,7 +55,7 @@ button, input { font: inherit; color: inherit; }
 .stat { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; min-width: 0; }
 .stat span { display: block; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
 .stat b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.warnings { margin: 10px 16px 0; padding: 8px 12px 8px 28px; background: var(--warn-bg); color: var(--warn-fg); border-radius: 8px; font-size: 13px; }
+.warnings { position: relative; margin: 10px 16px 0; padding: 8px 36px 8px 28px; background: var(--warn-bg); color: var(--warn-fg); border-radius: 8px; font-size: 13px; }
 
 .layout { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 16px; padding: 12px 16px 24px; align-items: start; }
 @media (min-width: 801px) { .side { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; padding-right: 4px; } }
@@ -83,10 +83,10 @@ button, input { font: inherit; color: inherit; }
 .card p.small { margin: 4px 0; }
 .path { border: 1px dashed var(--line); border-radius: 6px; padding: 6px 8px; margin: 6px 0; }
 .path.on { border: 1.5px solid var(--done); background: var(--done-bg); }
-.path-h { display: flex; align-items: center; gap: 6px; }
-.path-h .need { margin-left: auto; }
-.path-f { margin-top: 4px; font-size: 12px; }
-.path-f a, .pc a { color: var(--accent); }
+.path.off { opacity: .7; padding: 3px 8px; }
+.path-h { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.path-h .btn, .path-h a { margin-left: auto; }
+.path-h a, .pc a { color: var(--accent); }
 .pc { font-size: 12px; display: flex; gap: 6px; align-items: baseline; min-width: 0; }
 .pc a, .pc b { white-space: nowrap; flex: none; }
 .pc span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
@@ -131,10 +131,6 @@ button, input { font: inherit; color: inherit; }
 .cchip text { font-size: 11px; fill: var(--fg); }
 .cchip .more { fill: var(--accent); }
 .cchip .dot { fill: var(--locked); } .cchip .dot.ok { fill: var(--done); }
-.node.s-option { opacity: .5; }
-.s-option .box { fill: var(--card); stroke: var(--ph); stroke-dasharray: 4 3; }
-.edge.opt { stroke-dasharray: 4 3; opacity: .6; }
-.plink { fill: none; stroke: var(--ph); stroke-width: 1.2; stroke-dasharray: 1 4; stroke-linecap: round; opacity: .8; }
 .pnode { cursor: pointer; }
 .pnode:focus { outline: none; }
 .pnode .box { fill: var(--card); stroke: var(--ph); stroke-width: 2; stroke-dasharray: 8 5; }
@@ -142,6 +138,13 @@ button, input { font: inherit; color: inherit; }
 .pnode.sel .box, .pnode:focus-visible .box { stroke: var(--accent); stroke-width: 3; }
 .pnode .ch { font-weight: 700; font-size: 12px; fill: var(--ph); }
 .pnode .prow { fill: var(--ph-bg); stroke: none; }
+.pnode .prow.on { fill: var(--done-bg); stroke: var(--done); stroke-width: 1.5; }
+.pnode .prow.off { fill: var(--bg); }
+.pnode .poff { font-size: 11px; fill: var(--muted); }
+.pnode .qs { font-size: 11px; fill: var(--fg); }
+.pnode .q { font-weight: 700; fill: var(--ip); }
+.pnode .plink { fill: var(--accent); }
+.qlink { cursor: pointer; } .qlink:focus { outline: none; } .qlink:focus-visible .plink { text-decoration: underline; }
 .pnode .pt { font-size: 11.5px; font-weight: 600; fill: var(--fg); }
 .pnode .csub { font-size: 10px; fill: var(--muted); }
 .pnode .dot { fill: var(--locked); } .pnode .dot.ok { fill: var(--done); }
@@ -198,6 +201,8 @@ button, input { font: inherit; color: inherit; }
 .badge { font-style: normal; font-size: 11px; padding: 1px 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); }
 .badge.s-done { background: var(--done-bg); border-color: var(--done); } .badge.s-ip { background: var(--ip-bg); border-color: var(--ip); }
 .badge.s-ready { border-color: var(--ready); } .badge.s-locked { border-style: dashed; } .badge.s-placeholder { background: var(--ph-bg); border-color: var(--ph); }
+.dismiss { position: absolute; top: 4px; right: 6px; width: 24px; height: 24px; border: 0; border-radius: 6px; background: none; color: inherit; font-size: 18px; line-height: 1; cursor: pointer; opacity: .7; }
+.dismiss:hover, .dismiss:focus-visible { opacity: 1; background: rgba(0,0,0,.08); }
 </style>
 </head>
 <body>
@@ -235,7 +240,7 @@ button, input { font: inherit; color: inherit; }
         <div id="tree" class="scroll"></div>
         <div class="legend">
           <span><i class="s-done"></i>done</span><span><i class="s-ip"></i>in progress</span><span><i class="s-ready"></i>ready now</span>
-          <span><i class="s-locked"></i>locked</span><span><i class="s-placeholder"></i>GE / elective slot</span><span><i class="s-choice"></i>your pick (green dot: prereqs met)</span><span><i class="s-path"></i>choose a path (faded: courses on a path not taken yet)</span><span><i class="blk"></i>blocking prerequisite</span>
+          <span><i class="s-locked"></i>locked</span><span><i class="s-placeholder"></i>GE / elective slot</span><span><i class="s-choice"></i>your pick (green dot: prereqs met)</span><span><i class="s-path"></i>pick one of several options</span><span><i class="blk"></i>blocking prerequisite</span>
         </div>
       </section>
       <section id="plan-view" hidden><div id="plan" class="plan"></div></section>
