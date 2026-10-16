@@ -3,9 +3,18 @@ import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 const require = createRequire(import.meta.url);
 const { DARS } = require('../parser.js');
-const { COURSES } = require('../courses.js');
+const { COURSES } = require('../data/ucla-courses.js');
 const { MODEL } = require('../model.js');
 const { TREE_LAYOUT } = require('../ui.js');
+// synthetic courses (subject ZZ) so the offering rules are tested independently of the generated data
+Object.assign(COURSES, Object.fromEntries([
+  ['ZZ 10', 'FWS'], ['ZZ 11', 'FWS'], ['ZZ 12', 'FWS'], ['ZZ 13', 'FWS'], ['ZZ 14', 'FWS'], ['ZZ 15', 'FWS'],
+  ['ZZ 21', 'F'], ['ZZ 22', 'W', [['ZZ 21']]], ['ZZ 30', ''], ['ZZ 30W', 'FWS'], ['ZZ 31', ''], ['ZZ 32', 'S'], ['ZZ 33', 'W'],
+].map(([k, off, pre = []]) => [k, { t: k, u: 4, pre, off, ...(off ? {} : { offNote: 'not offered since Spring 2023' }) }])));
+const zz = c => ({ dept: 'ZZ', num: c.split(' ')[1], alts: [c] }), zzOr = (...alts) => ({ dept: 'ZZ', num: alts[0].split(' ')[1], alts });
+const synth = groups => ({ student: { expected: 'SP29' }, currentTerm: 'FA26', unitsNeeded: 0, taken: {},
+  sections: [{ title: 'S', needSubgroups: null, groups: groups.map(([name, needCourses, options]) => ({ name, needCourses, taken: [], notFrom: [], options })) }] });
+const offered = c => COURSES[c] && COURSES[c].off !== '';
 const parsed = DARS.parse(JSON.parse(readFileSync(new URL('../sample/dars-lines.json', import.meta.url), 'utf8')));
 const m = MODEL.build(parsed, { perQuarter: 4 });
 const grp = (mm, n) => mm.groups.find(g => g.name.startsWith(n) && g.selected !== false) || mm.groups.find(g => g.name.startsWith(n));
@@ -19,19 +28,19 @@ t('CHEM 20L chosen and planned', () => {
   assert.ok(termOf('CHEM 20L')); assert.equal(node('CHEM 20L').planned, termOf('CHEM 20L'));
 });
 const inPlan = (mm, c) => mm.plan.some(p => p.courses.includes(c));
-t('core: needs 10, shows 10 -> all auto-chosen; 157W resolved because 157 is never offered', () => {
+t('sample 1 core: needs 10, shows 10 -> all auto-chosen; an OR slot keeps only its offered course', () => {
   const g = grp(m, 'TWELVE'), c = chosen(g);
   assert.equal(c.length, 10); assert.ok(g.chosen.every(x => x.auto && /^required: 10 of 10/.test(x.why)));
-  assert.ok(c.includes('MECH&AE 157W')); assert.ok(!c.includes('MECH&AE 157')); assert.equal(g.choice, false);
+  assert.ok(c.every(offered), c.join()); assert.equal(g.choice, false);
 });
-t('aero track: needs 4, shows 4 -> all chosen', () => {
+t('sample 1 track group: needs 4, shows 4 -> all chosen', () => {
   const g = grp(m, 'FOUR COURSES FROM THE AERO');
   assert.equal(g.chosen.length, 4); assert.ok(g.chosen.every(x => x.auto)); assert.equal(g.choice, false); assert.equal(g.selected, true);
 });
-t('space track: needs 1, shows 4 -> choice, nothing auto-picked, ready first, CHOOSE slot', () => {
+t('sample 1 pick-1 group: every offered option is an alternative, nothing auto-picked, ready first, CHOOSE slot', () => {
   const g = grp(m, 'ONE COURSE FROM THE SPACE');
   assert.equal(g.choice, true); assert.equal(g.undecided, true); assert.deepEqual(g.chosen, []);
-  assert.equal(g.alternatives.length, 4);
+  assert.deepEqual(g.alternatives.map(a => a.code).sort(), g.options.filter(c => offered(c) && !parsed.taken[c]).sort());
   const a = g.alternatives; assert.ok(a[0].ready);
   for (let i = 1; i < a.length; i++) assert.ok(a[i - 1].ready > a[i].ready || (a[i - 1].ready === a[i].ready && a[i - 1].unmet <= a[i].unmet), a[i].code);
   for (const x of a) assert.equal(typeof x.why, 'string');
@@ -39,7 +48,7 @@ t('space track: needs 1, shows 4 -> choice, nothing auto-picked, ready first, CH
   assert.ok(inPlan(m, 'CHOOSE: ONE COURSE FROM THE SPACE TRACK'));
   assert.equal(node('CHOOSE: ONE COURSE FROM THE SPACE TRACK').status, 'placeholder');
 });
-t('pin C150R in space track -> chosen, slot gone', () => {
+t('pinning an option in a pick-1 group -> chosen, slot gone', () => {
   const key = grp(m, 'ONE COURSE FROM THE SPACE').key;
   const mm = MODEL.build(parsed, { choices: { [key]: ['MECH&AE C150R'] } }), g = grp(mm, 'ONE COURSE FROM THE SPACE');
   assert.deepEqual(g.chosen.map(c => [c.code, c.auto]), [['MECH&AE C150R', false]]);
@@ -62,7 +71,7 @@ t('ethics: both same-named groups shown, neither selected; pinning ENGR 2 select
   assert.ok(e2.every(g => !g.undecided)); assert.ok(inPlan(mm, 'ENGR 2'));
   assert.ok(!mm.nodes.some(n => n.code.startsWith('CHOOSE: ENGINEERING ETHICS')));
 });
-t('writing: a required course on the list (157W) satisfies it, no extra slot', () => {
+t('writing: a required course that is also on the writing list satisfies it, no extra slot', () => {
   const g = grp(m, 'ENGINEERING WRITING');
   assert.equal(g.choice, false); assert.deepEqual(g.chosen.map(c => c.code), ['MECH&AE 157W']);
   assert.ok(!m.nodes.some(n => n.code.startsWith('CHOOSE: ENGINEERING WRITING')));
@@ -78,34 +87,51 @@ t('GE groups still placeholders', () => {
   for (const n of ['HISTORICAL', 'SOCIAL']) { const g = grp(m, n); assert.ok(g.placeholder); assert.ok(g.options.length > 50); assert.ok(inPlan(m, 'GE: ' + g.name)); }
 });
 t('synthetic: OR-slot with both offered is its own choice; orPrev groups are alternatives; short list warns', () => {
-  const o = (...alts) => ({ dept: 'X', num: '1', alts });
   const p = { student: { expected: 'SP29' }, currentTerm: 'FA26', unitsNeeded: 0, taken: {}, sections: [
-    { title: 'S1', needSubgroups: null, groups: [{ name: 'A', needCourses: 2, taken: [], notFrom: [], options: [o('MECH&AE 161B'), o('MECH&AE 161A', 'ENGR 184')] }] },
-    { title: 'S2', needSubgroups: null, groups: [{ name: 'B', needCourses: 1, taken: [], notFrom: [], options: [o('ENGR 186')] },
-      { name: 'C', needCourses: 1, taken: [], notFrom: [], options: [o('ENGR 2')], orPrev: true }] },
-    { title: 'S3', needSubgroups: null, groups: [{ name: 'D', needCourses: 3, taken: [], notFrom: [], options: [o('MECH&AE 161C')] }] }] };
+    { title: 'S1', needSubgroups: null, groups: [{ name: 'A', needCourses: 2, taken: [], notFrom: [], options: [zz('ZZ 10'), zzOr('ZZ 11', 'ZZ 12')] }] },
+    { title: 'S2', needSubgroups: null, groups: [{ name: 'B', needCourses: 1, taken: [], notFrom: [], options: [zz('ZZ 13')] },
+      { name: 'C', needCourses: 1, taken: [], notFrom: [], options: [zz('ZZ 14')], orPrev: true }] },
+    { title: 'S3', needSubgroups: null, groups: [{ name: 'D', needCourses: 3, taken: [], notFrom: [], options: [zz('ZZ 15')] }] }] };
   const mm = MODEL.build(p, {});
-  const a = mm.groups.find(g => g.name === 'A'), sub = mm.groups.find(g => g.name === 'MECH&AE 161A OR ENGR 184');
-  assert.deepEqual(chosen(a), ['MECH&AE 161B']); assert.ok(sub.choice && sub.undecided && sub.selected);
+  const a = mm.groups.find(g => g.name === 'A'), sub = mm.groups.find(g => g.name === 'ZZ 11 OR ZZ 12');
+  assert.deepEqual(chosen(a), ['ZZ 10']); assert.ok(sub.choice && sub.undecided && sub.selected);
   const b = mm.groups.find(g => g.name === 'B'), c = mm.groups.find(g => g.name === 'C');
   assert.ok(!b.selected && !c.selected && b.altGroupKeys[0] === c.key);
-  assert.ok(inPlan(mm, 'CHOOSE: S2: ENGR 186 or ENGR 2'));
+  assert.ok(inPlan(mm, 'CHOOSE: S2: ZZ 13 or ZZ 14'));
   assert.ok(mm.warnings.some(w => /fewer options than it needs/.test(w)));
 });
-t('157D in WI, 157E the following SP', () => {
-  const d = termOf('MECH&AE 157D'), e = termOf('MECH&AE 157E');
-  assert.match(d, /^WI/); assert.equal(e, 'SP' + d.slice(2));
+const QTR = { FA: 'F', WI: 'W', SP: 'S' };
+t('a course is only planned in quarters it is offered (both samples, 2-4 per quarter)', () => {
+  for (const f of ['dars-lines.json', 'dars-lines-2.json']) for (const pq of [2, 3, 4]) {
+    const mm = MODEL.build(DARS.parse(JSON.parse(readFileSync(new URL('../sample/' + f, import.meta.url), 'utf8'))), { perQuarter: pq });
+    let n = 0;
+    for (const q of mm.plan) for (const c of q.courses) if (COURSES[c] && COURSES[c].off !== '?') {
+      n++; assert.ok(COURSES[c].off.includes(QTR[q.term.slice(0, 2)]), `${f}: ${c} planned ${q.term}, offered ${JSON.stringify(COURSES[c].off)}`);
+    }
+    assert.ok(n > 5, f);
+  }
+});
+t('a course offered in one quarter is planned only in that quarter, after its prereqs', () => {
+  const mm = MODEL.build(synth([['R', 2, [zz('ZZ 21'), zz('ZZ 22')]]]), {});
+  const at = c => mm.plan.find(q => q.courses.includes(c)).term;
+  assert.equal(at('ZZ 21'), 'FA27'); assert.equal(at('ZZ 22'), 'WI28'); // FA26 is the current term
+});
+t('a course with off "" is never auto-chosen or planned when an offered alternative is in the same slot', () => {
+  const mm = MODEL.build(synth([['R', 2, [zzOr('ZZ 30', 'ZZ 30W'), zz('ZZ 32')]], ['P', 1, [zz('ZZ 31'), zz('ZZ 33')]]]), {});
+  const r = mm.groups.find(g => g.name === 'R');
+  assert.deepEqual(chosen(r), ['ZZ 30W', 'ZZ 32']); assert.ok(r.chosen.every(x => x.auto)); assert.match(r.chosen[0].why, /ZZ 30 not offered recently/);
+  assert.ok(!mm.groups.some(g => g.name === 'ZZ 30 OR ZZ 30W'), 'no pick between an offered and a never-offered course');
+  const p = mm.groups.find(g => g.name === 'P'); // one viable option left: required, not a choice
+  assert.equal(p.choice, false); assert.deepEqual(chosen(p), ['ZZ 33']);
+  for (const c of ['ZZ 30', 'ZZ 31']) { assert.ok(!inPlan(mm, c), c); assert.ok(!mm.nodes.some(n => n.code === c), c); }
 });
 t('nothing planned before its prereqs', () => {
-  const idx = c => parsed.taken[c] || (c === 'CHEM 20A' || c === 'MATH 31B') ? -Infinity : termOf(c) ? DARS.termIndex(termOf(c)) : Infinity;
+  const idx = c => parsed.taken[c] ? -Infinity : termOf(c) ? DARS.termIndex(termOf(c)) : Infinity;
   for (const p of m.plan) for (const c of p.courses) for (const og of (COURSES[c] || { pre: [] }).pre)
     assert.ok(og.some(x => idx(x) < DARS.termIndex(p.term)), c + ' before ' + og);
 });
 t('perQuarter respected', () => { for (const p of m.plan) assert.ok(p.courses.length <= 4, p.term); });
 t('count-check warning', () => { assert.ok(m.warnings.some(w => /wants 5 .* add up to 4/.test(w))); });
-t('166A only in fall', () => {
-  for (const pq of [2, 3, 4]) { const mm = MODEL.build(parsed, { perQuarter: pq }); const p = mm.plan.find(p => p.courses.includes('MECH&AE 166A')); assert.match(p.term, /^FA/); }
-});
 t('pin a GE placeholder option becomes a real node', () => {
   const g = grp(m, 'HISTORICAL'), code = g.options[0];
   const mm = MODEL.build(parsed, { choices: { [g.key]: [code] } });
@@ -211,15 +237,16 @@ t('a prereq only an undecided path needs is added as a node but not planned', ()
   assert.ok(n176 && n176.pathPrereq); assert.equal(n176.planned, undefined); assert.ok(!planned(mm).includes('BIOENGR 176'));
   assert.ok(mm.edges.some(e => e.from === 'BIOENGR 176' && e.to.startsWith('PATH: ')));
 });
-t('sample 1: the two ENGINEERING ETHICS groups are one path choice: an 11-option list or ENGR 2', () => {
+t('sample 1: the two ENGINEERING ETHICS groups are one path choice: a list of its offered options or ENGR 2', () => {
   const pc = m.pathChoices.find(x => x.title === 'ENGINEERING ETHICS');
   assert.equal(pc.paths.length, 2);
   const list = pc.paths.find(p => p.choice), e2 = pc.paths.find(p => !p.choice);
   assert.ok(list && e2); assert.deepEqual(e2.courses, ['ENGR 2']); assert.deepEqual(list.courses, []);
-  assert.equal(list.summary, 'pick 1 of 11 from ETHICS list');
+  const nList = m.groups.find(g => g.key === list.groupKey).options.filter(c => offered(c) && !parsed.taken[c]).length;
+  assert.ok(nList > 5); assert.equal(list.summary, `pick 1 of ${nList} from ETHICS list`);
   assert.ok(!m.nodes.some(n => n.code === 'ENGR 2'));
   assert.ok(m.nodes.some(n => n.code === 'PATH: ' + pc.key && n.status === 'path'));
-  assert.ok(planned(m).some(c => c.startsWith('CHOOSE: ENGINEERING ETHICS:') && c.includes('pick 1 of 11') && c.includes('ENGR 2')));
+  assert.ok(planned(m).some(c => c.startsWith('CHOOSE: ENGINEERING ETHICS:') && c.includes(`pick 1 of ${nList}`) && c.includes('ENGR 2')));
   // picking the list path selects that group and leaves its own pick-1 slot
   const mm = MODEL.build(parsed, { choices: { ['path:' + pc.key]: [list.groupKey] } });
   assert.ok(mm.groups.find(g => g.key === list.groupKey).selected);

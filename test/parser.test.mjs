@@ -13,11 +13,11 @@ let n = 0; const t = (name, fn) => { fn(); n++; console.log('ok  ' + name); };
 t('header', () => {
   assert.equal(r.currentTerm, 'FA26'); assert.equal(r.student.expected, 'SP29'); assert.equal(r.unitsNeeded, 69);
 });
-t('taken courses and aliases', () => {
+t('taken courses; AP/transfer placeholders map to real courses through ALTERNATE CRS (via)', () => {
   assert.equal(r.taken['MAT SCI 104'].grade, 'IP');
   assert.equal(r.taken['MECH&AE 101'].grade, 'P'); // sample has letter grades scrubbed
   assert.equal(r.taken['CHEM 20A'].via, 'CHEM T01');
-  assert.ok(r.taken['MATH 31B']);
+  assert.equal(r.taken['MATH 31B'].via, 'MATH T03');
   assert.deepEqual(Object.keys(r.taken).filter(k => /MAT S CI|MECH& AE/.test(k)), []);
 });
 t('lower division chemistry', () => {
@@ -50,11 +50,11 @@ t('arts and humanities subgroups', () => {
   assert.equal(sec('FOUNDATIONS OF THE ARTS AND HUMANITIES').needSubgroups, 1);
 });
 t('parseOptions shape', () => {
-  const o = DARS.parseOptions('MECH&AE 102,105A,157 OR 157W ENGR 2(FA24-9999) MAT SCI 100 TO 187 CHEM 20B', 'FA26');
-  // 6 option slots (157 OR 157W is one slot with two alts) = 7 course codes
+  const o = DARS.parseOptions('MATH 31A,31B,32A OR 32AH ENGR 2(FA24-9999) STATS 100 TO 187 CHEM 20B', 'FA26');
+  // 6 option slots (32A OR 32AH is one slot with two alts) = 7 course codes
   assert.equal(o.length, 6); assert.equal(o.flatMap(x => x.alts).length, 7);
-  assert.deepEqual(o[2], { dept: 'MECH&AE', num: '157', alts: ['MECH&AE 157', 'MECH&AE 157W'] });
-  assert.deepEqual(o[4], { dept: 'MAT SCI', num: '100', alts: ['MAT SCI 100'], to: '187' });
+  assert.deepEqual(o[2], { dept: 'MATH', num: '32A', alts: ['MATH 32A', 'MATH 32AH'] });
+  assert.deepEqual(o[4], { dept: 'STATS', num: '100', alts: ['STATS 100'], to: '187' });
   assert.deepEqual(o[3].alts, ['ENGR 2']); assert.deepEqual(o[5].alts, ['CHEM 20B']);
   assert.deepEqual(DARS.parseOptions('ENGR 3(FA20-SU25)', 'FA26'), []);
 });

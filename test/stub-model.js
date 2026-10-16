@@ -1,8 +1,8 @@
 // TEST ONLY: crude stand-in for model.js that follows INTERFACE.md so ui.js can be exercised. Never loaded by index.html.
 (function (g) {
   function build(parsed, opts) {
-    const C = g.COURSES, A = g.ALIAS || {}, D = g.DARS, choices = opts.choices || {}, pq = opts.perQuarter || 4;
-    const taken = {}; for (const [c, t] of Object.entries(parsed.taken)) { taken[c] = t; if (A[c]) taken[A[c]] = t; }
+    const C = g.COURSES, D = g.DARS, choices = opts.choices || {}, pq = opts.perQuarter || 4;
+    const taken = Object.assign({}, parsed.taken);
     const has = c => taken[c] && taken[c].grade !== 'IP' ? 'done' : taken[c] ? 'ip' : null;
     const warnings = [], groups = [], used = new Set();
     parsed.sections.forEach(s => {
@@ -17,11 +17,10 @@
         }
         const placeholder = !options.some(c => C[c]), need = gr.needCourses;
         const pins = (choices[key] || []).filter(c => options.includes(c));
-        const avail = options.filter(c => !has(c) && !pins.includes(c) && !used.has(c) && (placeholder || C[c]))
-          .sort((a, b) => ((C[b] || {}).rec || 0) - ((C[a] || {}).rec || 0));
+        const avail = options.filter(c => !has(c) && !pins.includes(c) && !used.has(c) && (placeholder || C[c]));
         const chosen = pins.map(code => ({ code, auto: false, why: 'pinned by you' }));
         const choice = !placeholder && avail.length > need - pins.length; // more options than slots: the user decides
-        if (!placeholder && !choice) while (chosen.length < need && avail.length) { const code = avail.shift(); chosen.push({ code, auto: true, why: (C[code].rec ? 'aero relevance ' + C[code].rec : 'required / earliest available') }); }
+        if (!placeholder && !choice) while (chosen.length < need && avail.length) { const code = avail.shift(); chosen.push({ code, auto: true, why: 'required / earliest available' }); }
         chosen.forEach(c => used.add(c.code));
         const grp = { key, section: s.title, name: gr.name, need, taken: gr.taken, chosen, alternatives: choice ? avail.map(code => { const u = ((C[code] || {}).pre || []).filter(og => !og.some(has)).length; return { code, ready: !!C[code] && !u, unmet: u, why: C[code] ? (u ? 'needs ' + u + ' prereqs' : 'prereqs met') : 'not in course database' }; }) : [],
           placeholder, choice, undecided: choice && chosen.length < need, optionCount: options.length, options, selected: true, altGroupKeys: [] };
@@ -35,7 +34,7 @@
         order.forEach((x, j) => { x.selected = j < picked && j < k; x.undecided = !x.selected && picked < k; x.altGroupKeys = set.filter(y => y !== x).map(y => y.key); });
       }
     });
-    const nodes = {}, add = (code, extra) => { if (nodes[code]) return nodes[code]; const c = C[code] || {}; return nodes[code] = Object.assign({ code, title: c.t || (taken[code] || {}).title || code, units: c.u || (taken[code] || {}).units || 4, offered: c.off || '', note: c.note, prereqs: c.pre || [] }, extra); };
+    const nodes = {}, add = (code, extra) => { if (nodes[code]) return nodes[code]; const c = C[code] || {}; return nodes[code] = Object.assign({ code, title: c.t || (taken[code] || {}).title || code, units: c.u || (taken[code] || {}).units || 4, offered: c.off || '', prereqs: c.pre || [] }, extra); };
     for (const grp of groups) if (grp.selected) {
       if (grp.placeholder) add('GE: ' + grp.name, { status: 'placeholder', groupKey: grp.key, title: grp.name, units: 4, offered: 'FWS', prereqs: [] });
       else for (const c of grp.chosen) add(c.code, { groupKey: grp.key });

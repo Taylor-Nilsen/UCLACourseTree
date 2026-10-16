@@ -55,7 +55,7 @@
   }
   const RANK = { done: 5, ip: 4, incomplete: 3, unknown: 2, withdrawn: 1, failed: 0 };
 
-  // "MECH&AE 102,105A,157 OR 157W ENGR 2(FA24-9999) MAT SCI 100 TO 187 PSYCH 1@@" -> options.
+  // "MATH 31A,31B,32A OR 32AH ENGR 2(FA24-9999) STATS 100 TO 187 PSYCH 1@@" -> options.
   // info.bad collects fragments that are not course codes; info.attrs collects attribute filters ("F:W2T").
   function parseOptions(text, currentTerm, info) {
     info = info || {}; const bad = info.bad || (info.bad = []), attrs = info.attrs || (info.attrs = []);

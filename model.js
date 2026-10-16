@@ -1,8 +1,8 @@
 // Degree-plan model: parsed DARS -> requirement choices, prerequisite graph and a quarter-by-quarter plan.
-// Contract: INTERFACE.md. Depends on COURSES/ALIAS (courses.js) and DARS (parser.js).
+// Contract: INTERFACE.md. Depends on COURSES (data/ucla-courses.js) and DARS (parser.js).
 (function (g) {
-  const env = typeof module !== 'undefined' ? Object.assign({}, require('./courses.js'), require('./parser.js')) : g;
-  const { COURSES, ALIAS, DARS } = env;
+  const env = typeof module !== 'undefined' ? Object.assign({}, require('./data/ucla-courses.js'), require('./parser.js')) : g;
+  const { COURSES, DARS } = env;
   const EW = /ETHICS|WRITING/;
   // GE-style lists (hundreds of options) stay as searchable slots in their own area instead of choice nodes
   const BIGLIST = /FOUNDATIONS OF|GENERAL EDUCATION|\bGE\b|DIVERSITY|WRITING II|ENGINEERING WRITING|QUANTITATIVE REASONING|FOREIGN LANGUAGE|LANGUAGE REQUIREMENT/;
@@ -19,11 +19,10 @@
 
   function build(parsed, opts = {}) {
     const per = opts.perQuarter || 4, choices = opts.choices || {}, warnings = [];
-    // done/ip only (failed, withdrawn, incomplete attempts do not count), with aliases (MATH T03 -> MATH 31B)
+    // done/ip only (failed, withdrawn, incomplete attempts do not count); AP/transfer credit arrives already mapped by the parser (`via`)
     const st = t => t.status || (t.grade === 'IP' ? 'ip' : 'done');
     const taken = {};
     for (const [c, t] of Object.entries(parsed.taken)) if (['done', 'ip'].includes(st(t))) taken[c] = t;
-    for (const [c, t] of Object.entries(taken)) if (ALIAS[c] && !taken[ALIAS[c]]) taken[ALIAS[c]] = Object.assign({}, t, { via: c });
     const chosenBy = new Map(); // code -> groupKey that plans it
 
     // count checks: compare against the itemized groups of the section right before
@@ -100,7 +99,7 @@
         warnings.push(`${gr.section}: no technical breadth area is declared, so the plan holds ${plural(k, 'open slot')}. Declare one at my.engineering.ucla.edu and re-export the audit.`);
         return;
       }
-      // ethics/writing: a course already required elsewhere that is on this list satisfies it outright (e.g. 157W for Writing II)
+      // ethics/writing: a course already required elsewhere that is on this list satisfies it outright (a lab that also counts for Writing II)
       const already = gr._ew ? gr.options.filter(c => chosenBy.has(c) && chosenBy.get(c) !== gr.key && !pins.includes(c)).slice(0, k) : [];
       if (already.length && already.length >= k) {
         for (const c of already) gr.chosen.push({ code: c, auto: true, why: `already required for ${nameOf(chosenBy.get(c))}; it is on this list, so it counts here too` });
@@ -113,7 +112,7 @@
         const never = c => COURSES[c] && COURSES[c].off === '';
         const slots = gr._slots.filter(sl => !sl.some(c => pins.includes(c)))
           .map(sl => ({ v: sl.filter(c => ok(c) && !never(c)), off: sl.filter(c => ok(c) && never(c)) })).filter(sl => sl.v.length);
-        // ethics/writing: a course already required elsewhere that is on this list satisfies it outright (e.g. 157W for Writing II)
+        // same rule per slot
         const overlap = gr._ew ? slots.map(sl => sl.v.find(c => chosenBy.has(c) && chosenBy.get(c) !== gr.key)).filter(Boolean) : [];
         if (overlap.length && overlap.length >= k) {
           for (const c of overlap.slice(0, k)) gr.chosen.push({ code: c, auto: true, why: `already required for ${nameOf(chosenBy.get(c))}; it is on this list, so it counts here too` });
@@ -126,10 +125,10 @@
           const n = pins.length + slots.length;
           for (const sl of slots) {
             if (sl.v.length === 1) {
-              gr.chosen.push({ code: sl.v[0], auto: true, why: [`required: ${n} of ${n}`].concat(sl.off.length ? [sl.off.join(', ') + ' never offered'] : [], extras(sl.v[0], gr)).join('; ') });
+              gr.chosen.push({ code: sl.v[0], auto: true, why: [`required: ${n} of ${n}`].concat(sl.off.length ? [sl.off.join(', ') + ' not offered recently'] : [], extras(sl.v[0], gr)).join('; ') });
               continue;
             }
-            // "157 OR 157W" with both offered: that slot is its own pick-1 choice
+            // "A OR B" with both offered: that slot is its own pick-1 choice
             const sub = Object.assign({}, gr, { key: gr.key + '|' + sl.v.join(' OR '), name: sl.v.join(' OR '), need: 1, taken: [], options: sl.v, optionCount: sl.v.length,
               _slots: sl.v.map(c => [c]), _notFrom: [], _slotUnits: COURSES[sl.v[0]].u, _parent: gr });
             groups.splice(groups.indexOf(gr) + 1, 0, sub);
@@ -178,7 +177,7 @@
         altSlots.push({ code: 'CHOOSE: ' + name, units, groupKey: rest[0].key, title: name, pathChoiceKey: key });
       }
     }
-    // ethics/writing last so overlap info (157W in the core) is known
+    // ethics/writing last so overlap info (a required course that is also on the writing list) is known
     for (const { s, sec } of bySection.filter(b => !EW.test(b.s.title)).concat(bySection.filter(b => EW.test(b.s.title)))) {
       sec.forEach(choose);
       if (s.needSubgroups) { if (sec.length > s.needSubgroups) resolve(sec, s.needSubgroups, s.title); continue; }
@@ -195,10 +194,10 @@
     const add = (code, extra) => {
       if (nodes.has(code)) return;
       const c = COURSES[code], t = taken[code];
-      nodes.set(code, Object.assign({ code, title: c ? c.t : t ? t.title : code, units: c ? c.u : t ? t.units : 4, offered: c ? c.off : '?', prereqs: c ? c.pre : [] }, c && c.note ? { note: c.note } : {}, c && c.req && !c.pre.length ? { req: c.req } : {}, extra));
+      nodes.set(code, Object.assign({ code, title: c ? c.t : t ? t.title : code, units: c ? c.u : t ? t.units : 4, offered: c ? c.off : '?', prereqs: c ? c.pre : [] }, c && c.req && !c.pre.length ? { req: c.req } : {}, extra));
     };
     const viaSrc = new Set(Object.values(taken).map(t => t.via).filter(Boolean));
-    for (const [code, t] of Object.entries(taken)) if (!ALIAS[code] && !viaSrc.has(code) && !(t.via && !COURSES[code])) add(code, { status: st(t), term: t.term });
+    for (const [code, t] of Object.entries(taken)) if (!viaSrc.has(code) && !(t.via && !COURSES[code])) add(code, { status: st(t), term: t.term });
     for (const gr of groups) if (gr.selected) for (const c of gr.chosen) {
       if (c.code.startsWith('GE: ')) add(c.code, { title: gr.name, units: gr._slotUnits, offered: 'FWS', status: 'placeholder', groupKey: gr.key });
       else add(c.code, { groupKey: chosenBy.get(c.code) || gr.key });
@@ -242,7 +241,7 @@
     const todo = [...nodes.values()].filter(n => !taken[n.code] && n.status !== 'path' && !n.pathPrereq);
     let real = todo.filter(n => n.status !== 'placeholder');
     const slots = todo.filter(n => n.status === 'placeholder');
-    for (const n of real) if (n.offered === '') warnings.push(`${n.code} is not offered in 2025-27, so the plan can't schedule it.`);
+    for (const n of real) if (n.offered === '') warnings.push(`${n.code} can't be scheduled: ${COURSES[n.code].offNote || 'not offered'}.`);
     for (let changed = true; changed;) { // drop courses that can never be scheduled, and whatever depends on them
       changed = false;
       const keep = real.filter(n => n.offered !== '' && n.prereqs.every(grp => grp.some(x => taken[x] || real.some(r => r.code === x))));

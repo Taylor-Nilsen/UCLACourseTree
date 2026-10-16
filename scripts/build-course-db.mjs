@@ -1,6 +1,7 @@
-// Builds data/ucla-courses.js from the UCLA General Catalog (catalog.registrar.ucla.edu, a CourseLoop site).
-// Usage: node scripts/build-course-db.mjs [--year 2026] [--cache DIR]
-// No npm deps. Raw responses are cached in --cache so reruns don't refetch (delete the dir to refresh).
+// Builds data/ucla-courses.js from the UCLA General Catalog (catalog.registrar.ucla.edu, a CourseLoop site)
+// and the UCLA Schedule of Classes (sa.ucla.edu/ro/public/soc) for the quarters each course was actually offered.
+// Usage: node scripts/build-course-db.mjs [--year 2026] [--cache DIR] [--soc-cache DIR]
+// No npm deps. Raw responses are cached so reruns don't refetch (delete the dirs to refresh).
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -9,17 +10,13 @@ import { fileURLToPath } from 'node:url';
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CACHE = arg('--cache', path.join(os.tmpdir(), 'ucla-catalog-cache'));
+const SOC_CACHE = arg('--soc-cache', path.join(os.tmpdir(), 'ucla-soc-cache'));
 const SITE = 'https://catalog.registrar.ucla.edu';
-const SEAS = 'https://www.seasoasa.ucla.edu/curric-25-26/'; // Samueli course pages: the only bulk source of (F,W,Sp) offerings
-const SEAS_PAGES = { // page -> DARS subject
-  '27-bioeng-cours-25.html': 'BIOENGR', '34-chembio-cours-25.html': 'CH ENGR', '41-civenvi-cours-25.html': 'C&EE',
-  '49-compsci-cours-25.html': 'COM SCI', '57-ece-cours-25.html': 'EC ENGR', '64-matsci-cours-25.html': 'MAT SCI',
-  '71-mechaero-cours-25.html': 'MECH&AE', '74-schlwd-25.html': 'ENGR',
-};
-fs.mkdirSync(CACHE, { recursive: true });
+const SOC = 'https://sa.ucla.edu/ro/Public/SOC';
+fs.mkdirSync(CACHE, { recursive: true }); fs.mkdirSync(SOC_CACHE, { recursive: true });
 
-async function cached(name, url, opts) {
-  const f = path.join(CACHE, name);
+async function cached(name, url, opts, dir = CACHE) {
+  const f = path.join(dir, name);
   if (fs.existsSync(f)) return fs.readFileSync(f, 'utf8');
   for (let i = 0; ; i++) {
     try {
@@ -52,8 +49,6 @@ const OLD_YEARS = site.data.years.map(y => +y.value).filter(y => y < +YEAR).sort
 const oldItems = [];
 for (const y of OLD_YEARS) for (const j of await catalogYear(y)) oldItems.push({ ...j, year: y });
 const regHtml = await cached('registrar-subject-codes.html', 'https://registrar.ucla.edu/faculty-staff/courses-and-programs/department-and-subject-area-codes');
-const seas = {};
-for (const p of Object.keys(SEAS_PAGES)) seas[p] = await cached(`seas-${p}`, SEAS + p);
 
 // ---------- subject names -> DARS abbreviations ----------
 const dec = s => s.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&#39;|&rsquo;/g, "'")
@@ -80,7 +75,7 @@ const ALIASES = {
   'integrative biology and physiology': 'MC&IP', 'physiological science': 'PHYSCI', 'women\'s studies': 'GENDER',
   'near eastern languages and cultures': 'NR EAST', 'asian languages and cultures': 'ASIAN', 'computing': 'COMPTNG',
   'pic': 'COMPTNG', 'civil engineering': 'C&EE', 'materials science': 'MAT SCI', 'materials engineering': 'MAT SCI',
-  'mechanical engineering': 'MECH&AE', 'aerospace engineering': 'MECH&AE', 'chemical engineering': 'CH ENGR', 'religion': 'RELIGN',
+  'chemical engineering': 'CH ENGR', 'religion': 'RELIGN',
   'ge clusters': 'CLUSTER', 'semitics': 'SEMITIC', 'programming in computing': 'COMPTNG', 'life science': 'LIFESCI', 'english comp': 'ENGCOMP', 'math': 'MATH',
 };
 for (const [k, v] of Object.entries(ALIASES)) if (!NAME.has(k)) NAME.set(k, v);
@@ -157,31 +152,20 @@ function parsePre(sentences, self) {
   return pre;
 }
 
-// ---------- offerings from Samueli pages ----------
-const OFF = {};
-for (const [p, subj] of Object.entries(SEAS_PAGES)) {
-  const html = seas[p];
-  for (const m of html.matchAll(/<p class="course-title">([\s\S]*?)<\/p>\s*<p class="course-body">([\s\S]*?)<\/p>/g)) {
-    const num = dec(m[1]).match(/^([A-Z]{0,2}\d{1,3}[A-Z]{0,4})\./); const o = dec(m[2]).match(/\(((?:F|W|Sp|Su)(?:,\s*(?:F|W|Sp|Su))*)\)\s*$/);
-    if (num && o) OFF[`${subj} ${num[1]}`] = ['F', 'W', 'Sp'].filter(q => o[1].split(/,\s*/).includes(q)).map(q => q[0]).join('');
-  }
-}
-
 // ---------- build ----------
 const norm = c => c.replace(/\s+/g, ' ').trim();
 function entry(j) {
   const code = norm(j.code), desc = dec(j.description || '');
   const units = (j.credit_points_header || '').match(/\d+(?:\.\d+)?/g);
   const sents = reqSentences(desc);
-  const e = { t: dec(j.title), u: units ? Math.max(...units.map(Number)) : 0, pre: parsePre(sents, subjOf(code)), off: OFF[code] ?? '?' };
+  const e = { t: dec(j.title), u: units ? Math.max(...units.map(Number)) : 0, pre: parsePre(sents, subjOf(code)), off: '?' };
   if (sents.length) e.req = sents.join(' ');
+  if (/^(\([^)]*\)\s*)?Tutorial\b/.test(desc)) TUTORIAL.add(code); // arranged one-on-one; many departments never list these in the Schedule of Classes
   if (/Writing II/i.test(desc) && /satisf/i.test(desc)) e.w2 = true;
-  const same = desc.match(/^\(Same as ([^)]*)\)/); // multi-listed: offering is printed only under the home department
-  if (same) SAME[code] = parseClause(same[1].replace(/\.$/, ''), subjOf(code)).flat();
   if (j.year) e.last = j.year; // discontinued: last catalog year (e.g. 2023 = 2023-24) that listed it
   return e;
 }
-const SAME = {};
+const TUTORIAL = new Set();
 const isUG = j => /^Undergraduate/.test(j.course_level);
 const DB = {};
 for (const j of items.filter(isUG)) DB[norm(j.code)] = entry(j);
@@ -221,17 +205,63 @@ for (const e of Object.values(DB)) e.pre = e.pre.map(g => {
 });
 const np = Object.values(pruned).reduce((a, b) => a + b, 0);
 console.log(`pruned ${np} stale OR-alternatives: ${Object.entries(pruned).sort((a, b) => b[1] - a[1]).slice(0, 20).map(([k, v]) => `${k} x${v}`).join(', ')}`);
-for (const [k, cs] of Object.entries(SAME)) if (DB[k].off === '?') DB[k].off = cs.map(c => OFF[c]).find(Boolean) ?? '?';
+
+// ---------- offerings from the Schedule of Classes ----------
+// For every subject and term, list the courses with at least one section that is not cancelled. A course's `off` is the
+// set of quarters (F/W/S) it ran in during WINDOW; `offTerms` lists those terms. Summer sessions are out of scope.
+const Q = { F: 'Fall', W: 'Winter', S: 'Spring' };
+const tIdx = t => (+t.slice(0, 2) - (t[2] === 'F' ? 0 : 1)) * 3 + 'FWS'.indexOf(t[2]); // academic-year order
+const tName = i => { const y = Math.floor(i / 3), q = 'FWS'[i % 3]; return String(q === 'F' ? y : y + 1).padStart(2, '0') + q; };
+const label = t => `${Q[t[2]]} 20${t.slice(0, 2)}`;
+const home = await cached('soc-home.html', SOC, undefined, SOC_CACHE);
+const cur = tIdx(home.match(/value="(\d\d[FWS])"[^>]*selected="selected"/)[1]); // the term the site opens on
+const first = cur - cur % 3 - 6; // Fall two academic years back
+const WINDOW = Array.from({ length: cur + 2 - first }, (_, i) => tName(first + i)); // ... through the next term
+const LOOKBACK = Array.from({ length: 9 }, (_, i) => tName(first - 9 + i)); // older terms, only to date `offNote`
+const FLAGS = JSON.stringify({ enrollment_status: 'O,W,C,T,S', advanced: 'y', meet_days: null, start_time: null, end_time: null, // every status but cancelled
+  meet_locations: null, meet_units: null, instructor: null, class_career: null, impacted: null, enrollment_restrictions: null,
+  enforced_requisites: null, individual_studies: null, summer_session: null });
+async function socTerm(subj, term) { // course numbers with a live section, from the paged "course titles" view (25 per page)
+  const nums = new Set();
+  for (let page = 1; ; page++) {
+    const model = JSON.stringify({ subj_area_cd: subj, search_by: 'subject', term_cd: term, ActiveEnrollmentFlag: 'n', HasData: 'True' });
+    const qs = new URLSearchParams({ search_by: 'subject', model, pageNumber: page, filterFlags: FLAGS });
+    const html = await cached(`${term}-${subj.replace(/\W/g, '_')}-${page}.html`, `${SOC}/Results/CourseTitlesView?${qs}`,
+      { headers: { 'x-requested-with': 'XMLHttpRequest', 'user-agent': 'Mozilla/5.0' } }, SOC_CACHE);
+    const titles = [...html.matchAll(/<button class="linkLikeButton" id="[^"]+-title"[^>]*>([^<]+)</g)].map(m => m[1].trim().split(' - ')[0]);
+    if (!titles.length && html.length > 5000) throw new Error(`unexpected page: ${term} ${subj} ${page}`);
+    titles.forEach(n => nums.add(n));
+    if (titles.length < 25) return nums;
+  }
+}
+async function pool(jobs, n, fn) { // polite: at most n requests in flight
+  let i = 0, done = 0;
+  await Promise.all(Array.from({ length: n }, async () => { while (i < jobs.length) { await fn(jobs[i++]); if (++done % 200 === 0) console.log(`schedule of classes: ${done}/${jobs.length}`); } }));
+}
+const SEEN = {}; // code -> terms with a live section
+const subjAreas = [...new Set(Object.keys(DB).map(subjOf))];
+await pool(subjAreas.flatMap(s => [...LOOKBACK, ...WINDOW].map(t => [s, t])), 4, async ([s, t]) => {
+  for (const n of await socTerm(s, t)) (SEEN[`${s} ${n}`] ||= []).push(t);
+});
+for (const [k, e] of Object.entries(DB)) {
+  const seen = (SEEN[k] || []).sort((a, b) => tIdx(a) - tIdx(b)), offTerms = seen.filter(t => WINDOW.includes(t));
+  e.off = 'FWS'.split('').filter(q => offTerms.some(t => t[2] === q)).join('');
+  if (offTerms.length) e.offTerms = offTerms;
+  else if (TUTORIAL.has(k)) Object.assign(e, { off: '?', offNote: 'tutorial arranged with a faculty mentor; not listed in the Schedule of Classes' });
+  else e.offNote = `not offered since ${seen.length ? label(seen.at(-1)) : 'before ' + label(LOOKBACK[0])}`;
+}
 const sorted = Object.fromEntries(Object.entries(DB).sort(([a], [b]) => a.localeCompare(b, 'en', { numeric: true })));
 
 const out = path.join(ROOT, 'data', 'ucla-courses.js');
 fs.mkdirSync(path.dirname(out), { recursive: true });
 fs.writeFileSync(out, `// UCLA undergraduate course database, generated by scripts/build-course-db.mjs. Do not edit by hand.
 // Source: UCLA General Catalog ${YEAR}-${String(+YEAR + 1).slice(2)} (catalog.registrar.ucla.edu); subject codes per Registrar's
-// "Department and Subject Area Codes"; off (F/W/S) from the 2025-26 Samueli engineering course pages only, else "?".
-// Built ${new Date().toISOString().slice(0, 10)}. Shape: { t, u, pre: AND-of-OR groups, off, req?, w2?, last? (discontinued; last catalog year listing it) }
+// "Department and Subject Area Codes"; off/offTerms from the UCLA Schedule of Classes (sa.ucla.edu/ro/public/soc),
+// terms ${WINDOW[0]}-${WINDOW.at(-1)} (Fall/Winter/Spring; ${WINDOW.at(-1)} as published so far), counting sections that were not cancelled.
+// Built ${new Date().toISOString().slice(0, 10)}. Shape: { t, u, pre: AND-of-OR groups, off: quarters offered ("" = none in those terms),
+// offTerms?: terms it ran, offNote?: "not offered since <term>" when off is "" (off "?": an unlisted tutorial), req?, w2?, last? (discontinued; last catalog year listing it) }
 (function (g) {
-g.UCLA_COURSES = {
+g.COURSES = {
 ${Object.entries(sorted).map(([k, v]) => `${JSON.stringify(k)}:${JSON.stringify(v)}`).join(',\n')}
 };
 })(typeof module !== 'undefined' ? module.exports : window);
@@ -243,7 +273,7 @@ let refs = 0; const dangling = {};
 for (const e of Object.values(DB)) for (const g of e.pre) for (const c of g) { refs++; if (!DB[c]) dangling[c] = (dangling[c] || 0) + 1; }
 const nd = Object.values(dangling).reduce((a, b) => a + b, 0);
 console.log(`catalog year ${YEAR}: ${items.length} catalog courses (all levels); wrote ${keys.length} entries (${keys.filter(k => !DB[k].last && isUG(CUR_ANY[k] || {})).length} current undergraduate), ${subjects.size} subjects`);
-console.log(`with pre: ${Object.values(DB).filter(e => e.pre.length).length}, with req text: ${Object.values(DB).filter(e => e.req).length}, with off: ${Object.values(DB).filter(e => e.off !== '?').length}, w2: ${Object.values(DB).filter(e => e.w2).length}`);
+console.log(`with pre: ${Object.values(DB).filter(e => e.pre.length).length}, with req text: ${Object.values(DB).filter(e => e.req).length}, offered ${WINDOW[0]}-${WINDOW.at(-1)}: ${Object.values(DB).filter(e => e.off && e.off !== '?').length}, not offered: ${Object.values(DB).filter(e => !e.off).length}, unlisted tutorials: ${Object.values(DB).filter(e => e.off === '?').length}, w2: ${Object.values(DB).filter(e => e.w2).length}`);
 console.log(`pre references: ${refs}, dangling: ${nd} (${(100 * nd / refs).toFixed(2)}%)`);
 console.log('top dangling:', Object.entries(dangling).sort((a, b) => b[1] - a[1]).slice(0, 20).map(([k, v]) => `${k} x${v}`).join(', '));
 console.log(`wrote ${out} (${(fs.statSync(out).size / 1e6).toFixed(2)} MB)`);

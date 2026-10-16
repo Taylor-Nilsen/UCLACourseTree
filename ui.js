@@ -115,8 +115,7 @@
   const groupByKey = k => S.model.groups.find(g => g.key === k);
   function statusOf(code, nodes) {
     if (nodes[code]) return nodes[code].status;
-    const tk = S.parsed.taken, A = window.ALIAS || {};
-    const t = tk[code] || Object.keys(tk).filter(k => A[k] === code).map(k => tk[k])[0];
+    const t = S.parsed.taken[code]; // AP/transfer placeholders are already mapped to real courses by the parser (via)
     const st = t && (t.status || (t.grade === 'IP' ? 'ip' : 'done'));
     return st === 'done' || st === 'ip' ? st : 'none'; // failed / withdrawn / incomplete attempts do not count
   }
@@ -135,7 +134,9 @@
   const pathNeeds = p => p.ready ? 'prereqs met' : `needs ${p.unmet} prereq${p.unmet === 1 ? '' : 's'}`;
   const isPinned = (key, code) => (S.opts.choices[key] || []).includes(code);
   const isGE = n => { const g = n.groupKey && groupByKey(n.groupKey); return !!(g && g.placeholder); };
-  const offeredText = c => { const o = course(c) ? course(c).off : null; return o == null ? 'unknown' : o ? o.split('').map(q => QTR[q] || q).join(', ') : 'Not currently offered'; };
+  // "Fall, Spring (24F, 25S, 25F)" from the Schedule of Classes; "Not offered since ..." when it had no sections
+  const qtrs = o => o.split('').map(q => QTR[q] || q).join(', ');
+  const offeredText = c => { const k = course(c); return !k ? 'unknown' : k.offTerms ? `${qtrs(k.off)} (${k.offTerms.join(', ')})` : k.offNote ? k.offNote[0].toUpperCase() + k.offNote.slice(1) : k.off === '?' ? 'unknown' : k.off ? qtrs(k.off) : 'Not currently offered'; };
   const readyNow = c => (course(c) ? course(c).pre : []).every(og => og.some(x => ['done', 'ip'].includes(statusOf(x, {}))));
   // options a choice node / panel lists: pins first, then the model's ready-sorted alternatives
   function choiceOpts(g) {
@@ -459,7 +460,7 @@
     if (!grp && !n) { d.hidden = true; S.detail = null; return; }
     if (grp) { d.innerHTML = groupDetail(grp, nm); d.hidden = false; return; }
     const g = n.groupKey && groupByKey(n.groupKey), pinned = g && isPinned(g.key, n.code);
-    const off = n.offered ? n.offered.split('').map(q => QTR[q] || q).join(', ') : 'Not currently offered';
+    const off = course(n.code) ? offeredText(n.code) : n.offered ? qtrs(n.offered) : 'Not currently offered';
     const pre = preHtml(n.prereqs, nm);
     d.innerHTML = `<button class="close" data-close aria-label="Close">×</button>
       <h2>${pinned ? PIN + ' ' : ''}${esc(n.code)}</h2><p>${esc(n.title)}</p>
@@ -473,7 +474,7 @@
       <h3>Prerequisites</h3>${pre ? `<ul class="prelist">${pre}</ul>` : '<p class="muted">None</p>'}
       ${n.pathPrereq ? '<p class="muted small">Only an option you have not picked yet needs this, so it is not in the plan.</p>' : ''}
       ${n.status === 'placeholder' ? '<p class="muted small">Pick a specific course for this slot in the requirements panel.</p>' : ''}
-      ${n.note ? `<h3>Note</h3><p>${esc(n.note)}</p>` : ''}${n.req ? `<h3>Catalog requisites</h3><p>${esc(n.req)}</p>` : ''}`;
+      ${n.req ? `<h3>Catalog requisites</h3><p>${esc(n.req)}</p>` : ''}`;
     d.hidden = false;
   }
 
