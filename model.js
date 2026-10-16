@@ -140,17 +140,43 @@
       for (const c of gr.chosen) if (!chosenBy.has(c.code)) chosenBy.set(c.code, gr.key);
     }
     const groupUnits = x => x.placeholder || x.choice ? x._slotUnits * x.need : x.chosen.reduce((u, c) => u + ((COURSES[c.code] || {}).u || 4), 0);
-    const altSlots = []; // CHOOSE: <section> while a pick-k-of-subgroups is unresolved
-    function resolve(set, k, title) {
-      const pickedSet = set.filter(x => (choices[x.key] || []).some(c => x.options.includes(c))).slice(0, k);
+    const altSlots = [], pathChoices = []; // one path choice per alternative set; CHOOSE slot per missing pick
+    const dept = c => (DARS.splitCode(c) || {}).dept;
+    const joinCodes = cs => cs.map((c, i) => i && dept(c) && dept(c) === dept(cs[i - 1]) ? c.slice(dept(c).length + 1) : c).join(' + ');
+    function resolve(set, k, sTitle) {
+      const key = set[0].key, keys = set.map(x => x.key);
+      // explicit path pick first, then groups the user pinned a course in
+      const want = (choices['path:' + key] || []).filter(gk => keys.includes(gk));
+      const pinnedIn = set.filter(x => (choices[x.key] || []).some(c => x.options.includes(c))).map(x => x.key);
+      const pickedKeys = [...new Set(want.concat(pinnedIn))].slice(0, k), pickedSet = set.filter(x => pickedKeys.includes(x.key));
       for (const x of set) {
         x.selected = pickedSet.includes(x);
         x.altGroupKeys = set.filter(y => y !== x).map(y => y.key);
         x.undecided = !x.selected && pickedSet.length < k;
         if (!x.selected) for (const [c, key] of chosenBy) if (key === x.key) chosenBy.delete(c);
       }
+      // title: common leading words of the path names (>= 2 words), else the section title
+      const words = set.map(x => x.name.split(' '));
+      let n = 0; while (n < words[0].length && words.every(w => w[n] === words[0][n])) n++;
+      const title = n >= 2 ? words[0].slice(0, n).join(' ') : sTitle;
+      const paths = set.map(x => {
+        const choice = x.choice || x.placeholder, courses = x.chosen.filter(c => !choice || !c.auto).map(c => c.code);
+        // a choice path not yet pinned is judged by its best option
+        // otherwise: distinct missing prereqs outside the path (177B needing 177A of the same path is not a gap)
+        const miss = new Set(courses.flatMap(c => [...unmet(c)]).filter(c => !courses.includes(c)));
+        const um = x.placeholder ? 0 : choice && !courses.length ? Math.min(...x.alternatives.map(a => a.unmet).concat(x.alternatives.length ? [] : [0])) : miss.size;
+        const rest = x.name.split(' ').slice(n).join(' ') || x.name.split(' ').pop();
+        return { groupKey: x.key, name: x.name, courses, units: groupUnits(x), choice, need: x.need, placeholder: x.placeholder,
+          ready: !um, unmet: um,
+          summary: choice ? `pick ${x.need} of ${x.placeholder ? x.optionCount : x.chosen.length + x.alternatives.length} (${rest} list)` : joinCodes(courses) };
+      });
+      pathChoices.push({ key, section: sTitle, title, pick: k, paths, chosenPaths: pickedSet.map(x => x.key) });
       const rest = set.filter(x => !x.selected), units = Math.min(...rest.map(groupUnits));
-      for (let i = pickedSet.length; i < k; i++) altSlots.push({ code: 'CHOOSE: ' + title + (k - pickedSet.length > 1 ? ' #' + (i - pickedSet.length + 1) : ''), units, groupKey: rest[0].key, title });
+      const what = paths.filter(p => !pickedKeys.includes(p.groupKey)).map(p => p.summary).join(' or ');
+      for (let i = pickedSet.length; i < k; i++) {
+        const name = title + (k - pickedSet.length > 1 ? ' #' + (i - pickedSet.length + 1) : '') + ': ' + what;
+        altSlots.push({ code: 'CHOOSE: ' + name, units, groupKey: rest[0].key, title: name, pathChoiceKey: key });
+      }
     }
     // ethics/writing last so overlap info (157W in the core) is known
     for (const { s, sec } of bySection.filter(b => !EW.test(b.s.title)).concat(bySection.filter(b => EW.test(b.s.title)))) {
@@ -178,20 +204,23 @@
       else add(c.code, { groupKey: chosenBy.get(c.code) || gr.key });
     }
     // pending decisions hold their units in the plan; scheduled like GE slots
-    const slot = (code, title, units, groupKey) => { let c = code, i = 2; while (nodes.has(c)) c = code + ' (' + i++ + ')'; add(c, { title, units, offered: 'FWS', status: 'placeholder', groupKey, prereqs: [] }); };
+    const slot = (code, title, units, groupKey, extra) => { let c = code, i = 2; while (nodes.has(c)) c = code + ' (' + i++ + ')'; add(c, Object.assign({ title, units, offered: 'FWS', status: 'placeholder', groupKey, prereqs: [] }, extra)); };
     for (const gr of groups) if (gr.undecided && gr.selected) for (let i = 1; i <= gr._open; i++) slot('CHOOSE: ' + gr.name + (gr._open > 1 ? ' #' + i : ''), gr.name, gr._slotUnits, gr.key);
-    for (const a of altSlots) slot(a.code, a.title, a.units, a.groupKey);
+    for (const a of altSlots) slot(a.code, a.title, a.units, a.groupKey, { pathChoiceKey: a.pathChoiceKey });
     const stack = [...nodes.keys()].filter(c => !taken[c]);
     while (stack.length) for (const grp of nodes.get(stack.pop()).prereqs) {
       const m = grp.find(x => nodes.has(x)) || grp[0];
       if (!nodes.has(m)) { add(m, {}); stack.push(m); }
     }
+    // undecided paths: their courses are shown (status option) but never planned, and pull in no prereqs
+    for (const pc of pathChoices) if (pc.chosenPaths.length < pc.pick) for (const p of pc.paths) if (!pc.chosenPaths.includes(p.groupKey))
+      for (const c of p.courses) add(c, { status: 'option', pathChoiceKey: pc.key, pathGroupKey: p.groupKey });
     for (const n of nodes.values()) if (!n.status) n.status = n.prereqs.every(grp => grp.some(x => taken[x])) ? 'ready' : 'locked';
     const edges = [];
     for (const n of nodes.values()) for (const grp of n.prereqs) for (const p of grp) if (nodes.has(p)) edges.push({ from: p, to: n.code });
 
     // plan
-    const todo = [...nodes.values()].filter(n => !taken[n.code]);
+    const todo = [...nodes.values()].filter(n => !taken[n.code] && n.status !== 'option');
     let real = todo.filter(n => n.status !== 'placeholder');
     const slots = todo.filter(n => n.status === 'placeholder');
     for (const n of real) if (n.offered === '') warnings.push(`${n.code} is not offered in 2025-27, so the plan can't schedule it.`);
@@ -222,7 +251,7 @@
     for (const gr of groups) for (const k of Object.keys(gr)) if (k[0] === '_') delete gr[k];
     const plannedUnits = plan.reduce((u, p) => u + p.units, 0);
     return {
-      currentTerm: parsed.currentTerm, expectedTerm: parsed.student.expected, warnings, groups,
+      currentTerm: parsed.currentTerm, expectedTerm: parsed.student.expected, warnings, groups, pathChoices,
       nodes: [...nodes.values()], edges, plan,
       stats: { unitsEarned: Object.values(parsed.taken).filter(x => st(x) === 'done' && !x.via).reduce((u, x) => u + x.units, 0),
         unitsNeeded: parsed.unitsNeeded, plannedUnits, coursesRemaining: plan.reduce((n, p) => n + p.courses.length, 0) },

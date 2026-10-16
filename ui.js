@@ -10,8 +10,8 @@
   };
   if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-  const NW = 200, NH = 56, COLW = 340, ROWH = 110, PAD = 40, CW = 240, CHIPW = 108, MAXCHIPS = 8;
-  const STATUS = { done: 'Completed', ip: 'In progress', ready: 'Ready now', locked: 'Locked', placeholder: 'GE / elective slot' };
+  const NW = 200, NH = 56, COLW = 340, ROWH = 110, PAD = 40, CW = 240, CHIPW = 108, MAXCHIPS = 8, PW = 300, PROW = 46;
+  const STATUS = { done: 'Completed', ip: 'In progress', ready: 'Ready now', locked: 'Locked', placeholder: 'GE / elective slot', option: 'Path option (not chosen)' };
   const QTR = { F: 'Fall', W: 'Winter', S: 'Spring' };
   const PIN_D = 'M10 1l5 5-2 1-3 3 .5 3.5L9 15l-3-3-4 4-1-1 4-4-3-3 1.5-1.5L7 6l3-3z';
   const PIN = '<svg class="pin" viewBox="0 0 16 16" aria-label="pinned"><path d="M10 1l5 5-2 1-3 3 .5 3.5L9 15l-3-3-4 4-1-1 4-4-3-3 1.5-1.5L7 6l3-3z" fill="currentColor"/></svg>';
@@ -81,6 +81,14 @@
   }
   const titleOf = (code, nodes) => (nodes[code] && nodes[code].title) || ((window.COURSES || {})[code] || {}).t || '';
   const course = c => (window.COURSES || {})[c];
+  const pcs = () => S.model.pathChoices || [];
+  const pcByKey = k => pcs().find(pc => pc.key === k);
+  const pcOfGroup = gk => pcs().find(pc => pc.paths.some(p => p.groupKey === gk));
+  const pathDecided = pc => pc.chosenPaths.length >= pc.pick;
+  // "BIOENGR 177A → 177B" when a course in the path requires another one in it, else "+"
+  const pathText = p => p.choice || !p.courses.some(c => (course(c) ? course(c).pre.flat() : []).some(x => p.courses.includes(x))) ? p.summary : p.summary.replace(/ \+ /g, ' → ');
+  const pathHow = p => p.choice ? p.summary.replace(/ \(.*\)$/, '') : p.courses.length === 2 ? 'take both' : p.courses.length > 2 ? `take all ${p.courses.length}` : '';
+  const pathNeeds = p => p.ready ? 'prereqs met' : `needs ${p.unmet} prereq${p.unmet === 1 ? '' : 's'}`;
   const isPinned = (key, code) => (S.opts.choices[key] || []).includes(code);
   const isGE = n => { const g = n.groupKey && groupByKey(n.groupKey); return !!(g && g.placeholder); };
   const offeredText = c => { const o = course(c) ? course(c).off : null; return o == null ? 'unknown' : o ? o.split('').map(q => QTR[q] || q).join(', ') : 'Not currently offered'; };
@@ -91,7 +99,7 @@
     if (g.choice) return pins.concat(g.alternatives || []);
     return pins.concat((g.chosen || []).filter(c => c.auto && !c.code.startsWith('GE: ')).map(c => ({ code: c.code, why: c.why, ready: readyNow(c.code) })));
   }
-  const pickLabel = g => `Pick ${g.need} of ${choiceOpts(g).length}`;
+  const pickLabel = g => g.undeclared ? `Declare an area · ${g.need} course${g.need === 1 ? '' : 's'}` : `Pick ${g.need} of ${choiceOpts(g).length}`;
   function preHtml(prereqs, nm) {
     return (prereqs || []).map(og => '<li>' + og.map(c => {
       const s = statusOf(c, nm);
@@ -158,18 +166,31 @@
     return h + `<button class="btn sm" data-group="${esc(g.key)}">compare prereqs</button>`;
   }
 
+  // one card per path choice: each path is a whole alternative group, taken as a bundle
+  function pathCard(pc) {
+    const nm = nodeMap(), done = pathDecided(pc);
+    const rows = pc.paths.map((p, i) => {
+      const on = pc.chosenPaths.includes(p.groupKey), g = groupByKey(p.groupKey);
+      const cs = p.courses.map(c => `<div class="pc">${nm[c] ? `<a href="#" data-node="${esc(c)}">${esc(c)}</a>` : `<b>${esc(c)}</b>`} <span>${esc(titleOf(c, nm))}</span> <small>${esc((course(c) || {}).u ?? '?')} u</small></div>`).join('');
+      const body = p.choice ? (on ? cardBody(g) : `<details class="alts"><summary>show options</summary>${cardBody(g)}</details>`) : cs;
+      const sub = [p.name !== pc.title && p.name, pathHow(p)].filter(Boolean).join(' · ');
+      return `<div class="path${on ? ' on' : ''}"><div class="path-h"><i class="dot${p.ready ? ' ok' : ''}" title="${esc(pathNeeds(p))}"></i><b>Path ${i + 1}</b>
+        <span class="need">${esc(p.units)} u</span></div>${sub ? `<div class="small muted">${esc(sub)}</div>` : ''}${body}
+        <div class="path-f">${on ? `<span class="small">your path</span> <a href="#" data-change="${esc(pc.key)}">change</a>`
+          : `<button class="btn sm" data-take="${esc(p.groupKey)}" data-pc="${esc(pc.key)}">Take this path</button>`}</div></div>`;
+    }).join('');
+    return `<div class="card${done ? '' : ' pick'}"><div class="card-h"><b>${esc(pc.title)}</b><span class="need">Pick ${esc(pc.pick)} of ${pc.paths.length} paths</span></div>${rows}</div>`;
+  }
+
   function renderReqs() {
     let h = '', sec = null;
     for (const g of S.model.groups) {
+      const pc = pcOfGroup(g.key);
+      if (pc ? pc.paths[0].groupKey !== g.key : g.selected === false) continue; // drawn inside its path card
       if (g.section !== sec) { sec = g.section; h += `<h3 class="sec">${esc(sec)}</h3>`; }
+      if (pc) { h += pathCard(pc); continue; }
       const head = `<div class="card-h"><b>${esc(g.name)}</b><span class="need">${g.choice ? esc(pickLabel(g)) : 'need ' + esc(g.need)}</span></div>`;
-      const others = (g.altGroupKeys || []).map(k => (groupByKey(k) || {}).name || k).join(', ');
-      if (g.selected === false && g.undecided) {
-        h += `<div class="card pick">${head}<p class="small">alternative to ${esc(others)}: pin an option to use this group</p>${cardBody(g)}</div>`;
-      } else if (g.selected === false) {
-        h += `<div class="card muted">${head}<p class="small">alternative to ${esc(others)} (pin an option here to switch)</p>
-          <details class="alts"><summary>show options</summary>${cardBody(g)}</details></div>`;
-      } else h += `<div class="card${g.undecided ? ' pick' : ''}">${head}${cardBody(g)}</div>`;
+      h += `<div class="card${g.undecided ? ' pick' : ''}">${head}${cardBody(g)}</div>`;
     }
     $('#reqs').innerHTML = h;
   }
@@ -182,7 +203,7 @@
 
   // Layer = longest path from a source; rows ordered by barycenter of predecessors (one pass).
   // Choice nodes go under the column of their most advanced option; GE slots get their own lane at the bottom.
-  function layout(nodes, edges, cgroups, lane) {
+  function layout(nodes, edges, cgroups, lane, pchoices) {
     const preds = {}; nodes.forEach(n => { preds[n.code] = []; });
     edges.forEach(e => { if (preds[e.to] && preds[e.from]) preds[e.to].push(e.from); });
     const layer = {}, visiting = new Set();
@@ -193,8 +214,12 @@
       return (layer[c] = v);
     };
     nodes.forEach(n => L(n.code));
+    // a path's courses with no edges at all sit beside their path node instead of at the bottom of column 0
+    const linked = new Set(edges.filter(e => preds[e.from] && preds[e.to]).flatMap(e => [e.from, e.to]));
+    const pcOf = c => pchoices.find(pc => pc.paths.some(p => p.courses.includes(c)));
+    const floating = nodes.filter(n => !['done', 'ip'].includes(n.status) && !linked.has(n.code) && pcOf(n.code));
     const cols = [];
-    nodes.forEach(n => (cols[layer[n.code]] = cols[layer[n.code]] || []).push(n));
+    nodes.filter(n => !floating.includes(n)).forEach(n => (cols[layer[n.code]] = cols[layer[n.code]] || []).push(n));
     const row = {}, pos = {}, colY = [];
     for (let li = 0; li < cols.length; li++) {
       const col = cols[li] || [];
@@ -220,6 +245,17 @@
       colY[li] = y + cpos[g.key].h + 30;
       maxX = Math.max(maxX, x + CW);
     }
+    // path nodes: one column right of the courses their paths would add
+    for (const pc of pchoices) {
+      const fl = floating.filter(n => pcOf(n.code) === pc);
+      const li = Math.max(fl.length ? 1 : 0, ...pc.paths.flatMap(p => p.courses).filter(c => c in layer && !fl.some(n => n.code === c)).map(c => layer[c] + 1));
+      const y = Math.max(colY[li] || PAD, fl.length ? colY[li - 1] || PAD : 0), x = PAD + li * COLW, h = pathHeight(pc);
+      fl.forEach((n, i) => { pos[n.code] = { x: x - COLW, y: y + i * ROWH }; });
+      if (fl.length) colY[li - 1] = y + fl.length * ROWH;
+      cpos['p:' + pc.key] = { x, y, h };
+      colY[li] = y + Math.max(h + 30, fl.length * ROWH);
+      maxX = Math.max(maxX, x + PW);
+    }
     let h = Math.max(PAD + NH, ...Object.values(pos).map(p => p.y + NH), ...Object.values(cpos).map(p => p.y + p.h)) + PAD;
     let laneY = null;
     if (lane.length) {
@@ -233,10 +269,10 @@
   }
 
   const choiceRows = g => Math.ceil(Math.min(choiceOpts(g).length, MAXCHIPS + 1) / 2);
-  const choiceHeight = g => (g.selected ? 32 : 46) + choiceRows(g) * 24 + 6;
+  const choiceHeight = g => 32 + choiceRows(g) * 24 + 6;
   function choiceSvg(g, p) {
     const opts = choiceOpts(g), shown = opts.length > MAXCHIPS + 1 ? opts.slice(0, MAXCHIPS) : opts, more = opts.length - shown.length;
-    const top = g.selected ? 32 : 46;
+    const top = 32;
     const chip = (i, inner, attrs) => { const x = 8 + (i % 2) * (CHIPW + 8), y = top + Math.floor(i / 2) * 24;
       return `<g class="cchip" ${attrs} transform="translate(${x},${y})" tabindex="0" role="button"><rect width="${CHIPW}" height="20" rx="10"/>${inner}</g>`; };
     const chips = shown.map((o, i) => chip(i, `<circle class="dot${o.ready ? ' ok' : ''}" cx="11" cy="10" r="4"/><text x="20" y="14">${esc(trunc(o.code, 15))}</text>${o.pinned ? `<path class="pinp" transform="translate(${CHIPW - 16},4) scale(.75)" d="${PIN_D}"/>` : ''}`,
@@ -245,7 +281,25 @@
     return `<g class="cnode${S.detail === 'g:' + g.key ? ' sel' : ''}" data-group="${esc(g.key)}" transform="translate(${p.x},${p.y})" tabindex="0" role="button" aria-label="${esc(pickLabel(g) + ', ' + g.name)}">
       <title>${esc(pickLabel(g) + ' · ' + g.name)}</title><rect class="box" width="${CW}" height="${p.h}" rx="10"/>
       <text class="ch" x="10" y="20">${esc(trunc(pickLabel(g) + ' · ' + g.name, 34))}</text>
-      ${g.selected ? '' : `<text class="csub" x="10" y="36">or another group: pin to use this one</text>`}${chips}</g>`;
+      ${chips}</g>`;
+  }
+
+  const pathHeight = pc => 32 + (pathDecided(pc) ? 1 : pc.paths.length) * PROW;
+  const pathRowY = (pc, i) => 32 + (pathDecided(pc) ? 0 : i) * PROW;
+  function pathSvg(pc, pos) {
+    const done = pathDecided(pc), btn = (y, attrs, label, w) => `<g class="pbtn" ${attrs} transform="translate(${PW - w - 12},${y + 22})" tabindex="0" role="button"><rect width="${w}" height="18" rx="9"/><text x="${w / 2}" y="13" text-anchor="middle">${esc(label)}</text></g>`;
+    const row = (p, i, y) => `<rect class="prow" x="8" y="${y}" width="${PW - 16}" height="${PROW - 6}" rx="6"/>
+      <circle class="dot${p.ready ? ' ok' : ''}" cx="20" cy="${y + 14}" r="4"/>
+      <text class="pt" x="30" y="${y + 18}">${esc(trunc(`Path ${i + 1}: ${pathText(p)} (${p.units} u)`, 42))}</text>
+      <text class="csub" x="30" y="${y + 34}">${esc(pathNeeds(p))}</text>`;
+    const rows = done
+      ? pc.paths.map((p, i) => [p, i]).filter(([p]) => pc.chosenPaths.includes(p.groupKey)).slice(0, 1).map(([p, i]) => row(p, i, 32) + btn(32, `data-change="${esc(pc.key)}" aria-label="Change path"`, 'change', 56)).join('')
+      : pc.paths.map((p, i) => { const y = pathRowY(pc, i), on = pc.chosenPaths.includes(p.groupKey);
+          return row(p, i, y) + (on ? btn(y, `data-change="${esc(pc.key)}"`, 'chosen · change', 96) : btn(y, `data-take="${esc(p.groupKey)}" data-pc="${esc(pc.key)}" aria-label="${esc('Take path ' + (i + 1) + ': ' + pathText(p))}"`, 'Take this path', 96)); }).join('');
+    const head = done ? `Path chosen · ${pc.title}` : `${pc.pick > 1 ? `Choose ${pc.pick} paths` : 'Choose a path'} · ${pc.title}`;
+    return `<g class="pnode${done ? ' done' : ''}${S.detail === 'p:' + pc.key ? ' sel' : ''}" data-path="${esc(pc.key)}" transform="translate(${pos.x},${pos.y})" tabindex="0" role="button" aria-label="${esc(head)}">
+      <title>${esc(head + '\n' + pc.paths.map((p, i) => `Path ${i + 1}: ${pathText(p)} (${p.units} u)`).join('\n'))}</title>
+      <rect class="box" width="${PW}" height="${pos.h}" rx="10"/><text class="ch" x="10" y="20">${esc(trunc(head, 44))}</text>${rows}</g>`;
   }
 
   function renderTree() {
@@ -253,17 +307,24 @@
     if (!all.length) { $('#tree').innerHTML = '<p class="muted pad">Nothing to show yet.</p>'; return; }
     // CHOOSE: slots of major requirements are drawn as choice nodes; GE slots and courses go to the lane
     const lane = all.filter(n => isGE(n)), nodes = all.filter(n => !isGE(n) && !n.code.startsWith('CHOOSE: '));
-    const cgroups = S.model.groups.filter(g => g.undecided && !g.placeholder);
-    const { pos, cpos, laneY, w, h } = layout(nodes, edges, cgroups, lane);
+    const cgroups = S.model.groups.filter(g => g.undecided && !g.placeholder && g.selected !== false);
+    const pchoices = pcs().filter(pc => !pc.paths.every(p => p.placeholder)); // GE path choices stay in the GE lane
+    const { pos, cpos, laneY, w, h } = layout(nodes, edges, cgroups, lane, pchoices);
     const blocked = e => nm[e.to].status === 'locked' && !['done', 'ip'].includes(nm[e.from].status);
     const es = edges.filter(e => pos[e.from] && pos[e.to] && nm[e.from] && !isGE(nm[e.from]) && !isGE(nm[e.to])).sort((a, b) => blocked(a) - blocked(b)).map(e => {
       const a = pos[e.from], b = pos[e.to], x1 = a.x + NW, y1 = a.y + NH / 2, x2 = b.x, y2 = b.y + NH / 2, dx = Math.max(40, (x2 - x1) / 2);
-      return `<path class="edge${blocked(e) ? ' block' : ''}" d="M${x1} ${y1} C${x1 + dx} ${y1} ${x2 - dx} ${y2} ${x2} ${y2}"/>`;
+      return `<path class="edge${blocked(e) ? ' block' : ''}${nm[e.to].status === 'option' ? ' opt' : ''}" d="M${x1} ${y1} C${x1 + dx} ${y1} ${x2 - dx} ${y2} ${x2} ${y2}"/>`;
     }).join('');
+    // thin dotted lines tie each path's courses to its path node, so the alternatives read as branches of one decision
+    const curve = (x1, y1, x2, y2) => { const dx = Math.max(40, (x2 - x1) / 2); return `M${x1} ${y1} C${x1 + dx} ${y1} ${x2 - dx} ${y2} ${x2} ${y2}`; };
+    const links = pchoices.flatMap(pc => pc.paths.flatMap((p, i) => p.courses.filter(c => pos[c]).map(c => {
+      const a = pos[c], b = cpos['p:' + pc.key];
+      return `<path class="plink" d="${curve(a.x + NW, a.y + NH / 2, b.x, b.y + pathRowY(pc, i) + 20)}"/>`;
+    }))).join('');
     const ns = nodes.concat(lane).map(n => {
       const p = pos[n.code], chip = n.planned || n.term || '', ready = n.status === 'ready', pinned = n.groupKey && isPinned(n.groupKey, n.code);
       const cw = chip ? chip.length * 6.2 + 12 : 0, label = n.code.startsWith('CHOOSE: ') ? 'choose: ' + n.title : n.code;
-      return `<g class="node s-${esc(n.status)}${S.detail === n.code ? ' sel' : ''}" data-node="${esc(n.code)}" transform="translate(${p.x},${p.y})" tabindex="0" role="button" aria-label="${esc(n.code + ', ' + (STATUS[n.status] || n.status) + (pinned ? ', pinned' : ''))}">
+      return `<g class="node s-${esc(n.status)}${S.detail === n.code ? ' sel' : ''}" ${n.pathChoiceKey && n.status === 'placeholder' ? `data-path="${esc(n.pathChoiceKey)}"` : `data-node="${esc(n.code)}"`} transform="translate(${p.x},${p.y})" tabindex="0" role="button" aria-label="${esc(n.code + ', ' + (STATUS[n.status] || n.status) + (pinned ? ', pinned' : ''))}">
         <title>${esc(n.code + ' — ' + n.title)}</title><rect class="box" width="${NW}" height="${NH}" rx="8"/>
         ${pinned ? `<path class="pinp" transform="translate(8,10) scale(.8)" d="${PIN_D}"/>` : ''}
         <text class="code" x="${pinned ? 24 : 10}" y="22">${esc(trunc(label, Math.floor((NW - cw - (pinned ? 32 : 18)) / 7.8)))}</text>
@@ -271,9 +332,9 @@
         ${chip ? `<rect class="chip" x="${NW - cw - 8}" y="9" width="${cw}" height="17" rx="8.5"/><text class="chipt" x="${NW - 8 - cw / 2}" y="21" text-anchor="middle">${esc(chip)}</text>` : ''}
       </g>`;
     }).join('');
-    const cs = cgroups.map(g => choiceSvg(g, cpos[g.key])).join('');
+    const cs = cgroups.map(g => choiceSvg(g, cpos[g.key])).join('') + pchoices.map(pc => pathSvg(pc, cpos['p:' + pc.key])).join('');
     const ln = laneY == null ? '' : `<line class="lane" x1="${PAD / 2}" x2="${w - PAD / 2}" y1="${laneY - 14}" y2="${laneY - 14}"/><text class="lanet" x="${PAD}" y="${laneY + 6}">General Education</text>`;
-    $('#tree').innerHTML = `<svg id="tree-svg" data-w="${w}" data-h="${h}" xmlns="http://www.w3.org/2000/svg"><g id="zoomg">${es}${ns}${cs}${ln}</g></svg>`;
+    $('#tree').innerHTML = `<svg id="tree-svg" data-w="${w}" data-h="${h}" xmlns="http://www.w3.org/2000/svg"><g id="zoomg">${es}${links}${ns}${cs}${ln}</g></svg>`;
     applyZoom();
   }
 
@@ -289,7 +350,7 @@
     const nm = nodeMap();
     const chipFor = c => {
       const n = nm[c] || {};
-      if (c.startsWith('CHOOSE: ')) return `<button class="pchip choose" ${isGE(n) ? `data-node="${esc(c)}"` : `data-group="${esc(n.groupKey)}"`} title="Decision pending: open the options"><b>choose: ${esc(n.title)}</b><small>${esc(n.units ?? '')} u</small></button>`;
+      if (c.startsWith('CHOOSE: ')) return `<button class="pchip choose" ${n.pathChoiceKey ? `data-path="${esc(n.pathChoiceKey)}"` : isGE(n) ? `data-node="${esc(c)}"` : `data-group="${esc(n.groupKey)}"`} title="Decision pending: open the options"><b>choose: ${esc(n.title)}</b><small>${esc(n.units ?? '')} u</small></button>`;
       return `<button class="pchip s-${esc(n.status || '')}" data-node="${esc(c)}"><b>${esc(c)}</b><span>${esc(titleOf(c, nm))}</span><small>${esc(n.units ?? '')} u</small></button>`;
     };
     $('#plan').innerHTML = (S.model.plan || []).map(t => `<div class="term${t.beyondExpected ? ' late' : ''}">
@@ -300,7 +361,6 @@
   }
 
   function groupDetail(g, nm) {
-    const others = (g.altGroupKeys || []).map(k => (groupByKey(k) || {}).name || k).join(', ');
     const rows = choiceOpts(g).map(o => {
       const c = course(o.code) || {}, pre = preHtml(c.pre, nm);
       return `<div class="optd${o.pinned ? ' on' : ''}"><div class="optd-h">${o.pinned ? PIN : `<i class="dot${o.ready ? ' ok' : ''}" title="${o.ready ? 'prereqs met' : 'prereqs missing'}"></i>`}
@@ -313,13 +373,32 @@
     }).join('');
     return `<button class="close" data-close aria-label="Close">×</button>
       <h2>${esc(pickLabel(g))}</h2><p>${esc(g.name)}<br><small class="muted">${esc(g.section)}</small></p>
-      ${g.selected ? '' : `<p class="small">Alternative to ${esc(others)}. Pinning an option here uses this group instead.</p>`}
+      ${g.selected === false && pcOfGroup(g.key) ? `<p class="small">One path of ${esc(pcOfGroup(g.key).title)}. Pinning an option here takes this path. <a href="#" data-path="${esc(pcOfGroup(g.key).key)}">Compare paths</a></p>` : ''}
       <p class="small muted">Green dot: prerequisites done, in progress or pinned. Grey: something is still missing.</p>${rows}`;
+  }
+
+  function pathDetail(pc, nm) {
+    const rows = pc.paths.map((p, i) => {
+      const on = pc.chosenPaths.includes(p.groupKey);
+      const cs = p.courses.map(c => { const k = course(c) || {}, pre = preHtml(k.pre, nm);
+        return `<div class="pcourse"><b>${nm[c] ? `<a href="#" data-node="${esc(c)}">${esc(c)}</a>` : esc(c)}</b> <span class="muted small">${esc(k.u ?? '?')} u</span>
+          <div class="small">${esc(k.t || 'Not in the course database')}</div><div class="small muted">Offered: ${esc(offeredText(c))}</div>
+          ${pre ? `<ul class="prelist small">${pre}</ul>` : `<div class="small muted">${k.t ? 'No prerequisites' : 'Prerequisites unknown'}</div>`}</div>`; }).join('');
+      const list = p.choice ? `<p class="small">${esc(p.summary)}. ${p.placeholder ? 'Pick the course in the Requirements panel once you take this path.' : `<a href="#" data-group="${esc(p.groupKey)}">See every option</a>`}</p>` : '';
+      return `<div class="optd${on ? ' on' : ''}"><div class="optd-h"><i class="dot${p.ready ? ' ok' : ''}" title="${esc(pathNeeds(p))}"></i><b>Path ${i + 1}</b><span class="muted small">${esc(p.units)} u</span>
+        ${on ? `<button class="btn sm" data-change="${esc(pc.key)}">Change</button>` : `<button class="btn sm" data-take="${esc(p.groupKey)}" data-pc="${esc(pc.key)}">Take this path</button>`}</div>
+        <div class="small">${esc(pathText(p))}${pathHow(p) && !p.choice ? ` <span class="muted">(${esc(pathHow(p))})</span>` : ''}</div>
+        <div class="small muted">${esc(p.name)} · ${esc(pathNeeds(p))}</div>${list}${cs}</div>`;
+    }).join('');
+    return `<button class="close" data-close aria-label="Close">×</button>
+      <h2>${pathDecided(pc) ? 'Path chosen' : pc.pick > 1 ? `Choose ${esc(pc.pick)} paths` : 'Choose a path'}</h2><p>${esc(pc.title)}<br><small class="muted">${esc(pc.section)}</small></p>
+      <p class="small muted">Each path is taken as a whole: the plan schedules every course in the path you take and none from the others. Green dot: prerequisites done, in progress or pinned.</p>${rows}`;
   }
 
   function renderDetail() {
     const d = $('#detail'), nm = S.model ? nodeMap() : {}, id = S.detail || '';
-    const grp = id.startsWith('g:') && S.model && groupByKey(id.slice(2)), n = nm[id];
+    const grp = id.startsWith('g:') && S.model && groupByKey(id.slice(2)), n = nm[id], pc = id.startsWith('p:') && S.model && pcByKey(id.slice(2));
+    if (pc) { d.innerHTML = pathDetail(pc, nm); d.hidden = false; return; }
     if (!grp && !n) { d.hidden = true; S.detail = null; return; }
     if (grp) { d.innerHTML = groupDetail(grp, nm); d.hidden = false; return; }
     const g = n.groupKey && groupByKey(n.groupKey), pinned = g && isPinned(g.key, n.code);
@@ -332,6 +411,7 @@
       <dt>Units</dt><dd>${esc(n.units)}</dd>
       ${n.term ? `<dt>Taken</dt><dd>${esc(n.term)}</dd>` : ''}${n.planned ? `<dt>Planned</dt><dd>${esc(n.planned)}</dd>` : ''}
       <dt>Offered</dt><dd>${esc(off)}</dd>
+      ${n.pathChoiceKey && n.status === 'option' ? `<dt>Path option</dt><dd>${esc((pcByKey(n.pathChoiceKey) || {}).title)}<br><a href="#" data-path="${esc(n.pathChoiceKey)}">Choose a path</a></dd>` : ''}
       ${g ? `<dt>Satisfies</dt><dd>${esc(g.name)}<br><small class="muted">${esc(g.section)}</small></dd>` : ''}</dl>
       ${g && !g.placeholder && (g.choice || (g.altGroupKeys || []).length) ? `<p><a href="#" data-group="${esc(g.key)}">All options for this requirement</a></p>` : ''}
       <h3>Prerequisites</h3>${pre ? `<ul class="prelist">${pre}</ul>` : '<p class="muted">None</p>'}
@@ -342,8 +422,8 @@
 
   function openDetail(id) {
     S.detail = id; renderDetail();
-    document.querySelectorAll('.node.sel,.cnode.sel').forEach(e => e.classList.remove('sel'));
-    document.querySelectorAll(id.startsWith('g:') ? '.cnode' : '.node').forEach(e => { if ((id.startsWith('g:') ? 'g:' + e.dataset.group : e.dataset.node) === id) e.classList.add('sel'); });
+    document.querySelectorAll('.node.sel,.cnode.sel,.pnode.sel').forEach(e => e.classList.remove('sel'));
+    document.querySelectorAll('.node,.cnode,.pnode').forEach(e => { if ((e.dataset.path ? 'p:' + e.dataset.path : e.dataset.group ? 'g:' + e.dataset.group : e.dataset.node) === id) e.classList.add('sel'); });
   }
 
   // ---------- choices ----------
@@ -352,8 +432,23 @@
     const a = (S.opts.choices[key] || []).filter(c => c !== code); a.push(code);
     while (a.length > Math.max(1, g.need || 1)) a.shift();
     S.opts.choices[key] = a;
-    // pinning inside a losing subgroup (the set is already decided) means "this one wins": drop the rivals' pins
-    if (g.selected === false && !g.undecided) (g.altGroupKeys || []).forEach(k => delete S.opts.choices[k]);
+    // pinning inside a path that is not taken takes that path
+    const pc = g.selected === false && pcOfGroup(key);
+    if (pc) return takePath(pc.key, key);
+    commit();
+  }
+  // take a path: it joins the picks (oldest dropped beyond pick k); pins in paths no longer taken are dropped
+  function takePath(pcKey, gk) {
+    const pc = pcByKey(pcKey); if (!pc) return;
+    const keep = pc.chosenPaths.filter(k => k !== gk).concat(gk).slice(-pc.pick);
+    S.opts.choices['path:' + pcKey] = keep;
+    pc.paths.forEach(p => { if (!keep.includes(p.groupKey)) delete S.opts.choices[p.groupKey]; });
+    commit();
+  }
+  function clearPath(pcKey) {
+    const pc = pcByKey(pcKey); if (!pc) return;
+    delete S.opts.choices['path:' + pcKey];
+    pc.paths.forEach(p => delete S.opts.choices[p.groupKey]);
     commit();
   }
   function unpin(key, code) {
@@ -364,16 +459,19 @@
 
   // ---------- events ----------
   document.addEventListener('click', e => {
-    const t = e.target.closest('[data-act],[data-node],[data-group],[data-tab],[data-zoom],[data-sample],[data-close],[data-diag]');
+    const t = e.target.closest('[data-act],[data-node],[data-group],[data-path],[data-take],[data-change],[data-tab],[data-zoom],[data-sample],[data-close],[data-diag]');
     if (!t) return;
     if (t.dataset.diag !== undefined) return copyDiag(t);
     if (t.dataset.sample !== undefined) {
       if (!Array.isArray(window.SAMPLE_LINES)) return showError('Sample audit (sample/dars-lines.js) did not load.');
       return load(window.SAMPLE_LINES, true);
     }
-    if (t.dataset.close !== undefined) { S.detail = null; document.querySelectorAll('.node.sel').forEach(x => x.classList.remove('sel')); return renderDetail(); }
+    if (t.dataset.close !== undefined) { S.detail = null; document.querySelectorAll('.sel').forEach(x => x.classList.remove('sel')); return renderDetail(); }
     if (t.dataset.tab) { S.tab = t.dataset.tab; return renderTabs(); }
     if (t.dataset.zoom) { S.zoom = Math.min(2, Math.max(0.4, Math.round((S.zoom + 0.2 * t.dataset.zoom) * 10) / 10)); return applyZoom(); }
+    if (t.dataset.take) { e.preventDefault(); return takePath(t.dataset.pc, t.dataset.take); }
+    if (t.dataset.change) { e.preventDefault(); return clearPath(t.dataset.change); }
+    if (t.dataset.path) { e.preventDefault(); return openDetail('p:' + t.dataset.path); }
     if (t.dataset.node) { e.preventDefault(); return openDetail(t.dataset.node); }
     const { act, key, code } = t.dataset;
     if (act === 'pin') pin(key, code);
@@ -382,7 +480,7 @@
   });
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && S.detail) { S.detail = null; renderDetail(); }
-    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('.node,.cnode,.cchip')) { e.preventDefault(); e.target.dispatchEvent(new MouseEvent('click', { bubbles: true })); }
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('.node,.cnode,.cchip,.pnode,.pbtn')) { e.preventDefault(); e.target.dispatchEvent(new MouseEvent('click', { bubbles: true })); }
   });
   document.addEventListener('toggle', e => {
     const k = e.target.matches && e.target.matches('details.alts[data-key]') && e.target.dataset.key;

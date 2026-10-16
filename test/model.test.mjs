@@ -88,7 +88,7 @@ t('synthetic: OR-slot with both offered is its own choice; orPrev groups are alt
   assert.deepEqual(chosen(a), ['MECH&AE 161B']); assert.ok(sub.choice && sub.undecided && sub.selected);
   const b = mm.groups.find(g => g.name === 'B'), c = mm.groups.find(g => g.name === 'C');
   assert.ok(!b.selected && !c.selected && b.altGroupKeys[0] === c.key);
-  assert.ok(inPlan(mm, 'CHOOSE: S2'));
+  assert.ok(inPlan(mm, 'CHOOSE: S2: ENGR 186 or ENGR 2'));
   assert.ok(mm.warnings.some(w => /fewer options than it needs/.test(w)));
 });
 t('157D in WI, 157E the following SP', () => {
@@ -136,5 +136,68 @@ t('wildcards expand against COURSES and NOT FROM (codes and ranges) is honored',
   assert.ok(h.options.includes('PSYCH 110') && h.options.some(c => /^LING /.test(c)));
   assert.ok(!h.options.some(c => /^PSYCH 19[2-9]/.test(c)), 'PSYCH 192-199 excluded');
   assert.ok(!cs.options.includes('COM SCI 188'));
+});
+// ---- paths: an alternative set is one decision made of whole-group paths
+const p2 = DARS.parse(JSON.parse(readFileSync(new URL('../sample/dars-lines-2.json', import.meta.url), 'utf8')));
+const m2 = MODEL.build(p2, { perQuarter: 4 });
+const cap = m2.pathChoices.find(pc => pc.title === 'BIOENGINEERING CAPSTONE');
+const planned = mm => mm.plan.flatMap(p => p.courses);
+t('sample 2: capstone is one path choice: [177A, 177B] (need 2) or [177C] (need 1)', () => {
+  assert.ok(cap); assert.equal(cap.pick, 1); assert.deepEqual(cap.chosenPaths, []);
+  assert.deepEqual(cap.paths.map(p => [p.courses, p.need, p.choice]), [[['BIOENGR 177A', 'BIOENGR 177B'], 2, false], [['BIOENGR 177C'], 1, false]]);
+  assert.equal(cap.paths[1].ready, true); assert.equal(cap.paths[0].ready, false); assert.ok(cap.paths[0].unmet > 0);
+});
+const SEVEN = ['BIOENGR 110', 'BIOENGR 120', 'BIOENGR 122', 'BIOENGR 167L', 'BIOENGR 175', 'BIOENGR 176', 'BIOENGR 180'];
+t('sample 2: the 7 required upper-division courses are planned whatever the capstone path', () => {
+  const g = m2.groups.find(x => /^EIGHT BIOENGINEERING/.test(x.name)), req = g.chosen.map(c => c.code);
+  assert.ok(g.selected && !g.choice && req.length === 7);
+  for (const gk of [null, ...cap.paths.map(p => p.groupKey)]) {
+    const mm = gk ? MODEL.build(p2, { choices: { ['path:' + cap.key]: [gk] } }) : m2;
+    for (const c of req) assert.ok(planned(mm).includes(c) || p2.taken[c], c);
+  }
+  assert.ok(req.every(c => SEVEN.includes(c) || p2.taken[c]), req.join());
+});
+t('sample 2 undecided: one CHOOSE slot naming both paths; 177A/B/C are option nodes, not planned', () => {
+  const slots = planned(m2).filter(c => c.startsWith('CHOOSE: BIOENGINEERING CAPSTONE'));
+  assert.equal(slots.length, 1); assert.ok(slots[0].includes('177A + 177B') && slots[0].includes('177C'), slots[0]);
+  const sl = m2.nodes.find(n => n.code === slots[0]); assert.equal(sl.pathChoiceKey, cap.key); assert.equal(sl.units, 8);
+  for (const c of ['BIOENGR 177A', 'BIOENGR 177B', 'BIOENGR 177C']) {
+    const nd = m2.nodes.find(n => n.code === c);
+    assert.equal(nd.status, 'option'); assert.equal(nd.planned, undefined); assert.equal(nd.pathChoiceKey, cap.key); assert.ok(nd.pathGroupKey);
+    assert.ok(!planned(m2).includes(c));
+  }
+  assert.ok(m2.edges.some(e => e.from === 'BIOENGR 177A' && e.to === 'BIOENGR 177B'), 'prereq edges into option nodes render');
+});
+t('option nodes are excluded from stats', () => {
+  const opt = m2.nodes.filter(n => n.status === 'option');
+  assert.ok(opt.length);
+  assert.equal(m2.stats.coursesRemaining, planned(m2).length);
+  assert.equal(m2.stats.plannedUnits, m2.plan.reduce((u, p) => u + p.units, 0));
+  assert.ok(!m2.plan.some(p => p.courses.some(c => opt.some(o => o.code === c))));
+});
+t('choosing path 1 plans 177A before 177B and drops 177C and the slot; path 2 plans 177C only', () => {
+  const [a, b] = cap.paths.map(p => MODEL.build(p2, { choices: { ['path:' + cap.key]: [p.groupKey] } }));
+  const term = (mm, c) => { const p = mm.plan.find(q => q.courses.includes(c)); return p && DARS.termIndex(p.term); };
+  assert.ok(term(a, 'BIOENGR 177A') < term(a, 'BIOENGR 177B'));
+  assert.ok(COURSES['BIOENGR 177B'].pre.some(og => og.includes('BIOENGR 177A')));
+  assert.ok(!a.nodes.some(n => n.code === 'BIOENGR 177C')); assert.ok(!a.nodes.some(n => n.status === 'option'));
+  assert.ok(!planned(a).some(c => c.startsWith('CHOOSE: BIOENGINEERING CAPSTONE')));
+  assert.deepEqual(a.pathChoices.find(pc => pc.key === cap.key).chosenPaths, [cap.paths[0].groupKey]);
+  assert.ok(term(b, 'BIOENGR 177C')); assert.ok(!b.nodes.some(n => /BIOENGR 177[AB]/.test(n.code)));
+  assert.ok(!planned(b).some(c => c.startsWith('CHOOSE: BIOENGINEERING CAPSTONE')));
+});
+t('sample 1: the two ENGINEERING ETHICS groups are one path choice: an 11-option list or ENGR 2', () => {
+  const pc = m.pathChoices.find(x => x.title === 'ENGINEERING ETHICS');
+  assert.equal(pc.paths.length, 2);
+  const list = pc.paths.find(p => p.choice), e2 = pc.paths.find(p => !p.choice);
+  assert.ok(list && e2); assert.deepEqual(e2.courses, ['ENGR 2']); assert.deepEqual(list.courses, []);
+  assert.match(list.summary, /^pick 1 of 11 /);
+  assert.equal(m.nodes.find(n => n.code === 'ENGR 2').status, 'option');
+  assert.ok(planned(m).some(c => c.startsWith('CHOOSE: ENGINEERING ETHICS:') && c.includes('pick 1 of 11') && c.includes('ENGR 2')));
+  // picking the list path selects that group and leaves its own pick-1 slot
+  const mm = MODEL.build(parsed, { choices: { ['path:' + pc.key]: [list.groupKey] } });
+  assert.ok(mm.groups.find(g => g.key === list.groupKey).selected);
+  assert.ok(!mm.nodes.some(n => n.code === 'ENGR 2'));
+  assert.ok(planned(mm).includes('CHOOSE: ENGINEERING ETHICS'));
 });
 console.log(n + ' passed');

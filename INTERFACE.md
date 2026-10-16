@@ -40,7 +40,7 @@ already used in parser.js and courses.js.
 - `DARS.termIndex('WI27')` -> sortable int, `DARS.termName(int)` inverse. Quarter order FA, WI, SP, SU within an academic year.
 
 ## model.js must expose `window.MODEL.build(parsed, opts) -> model`
-`opts = { choices: { [groupKey]: string[] }  /* user-pinned course codes per group */, perQuarter: 4, useSummer: false }`
+`opts = { choices: { [groupKey]: string[] /* user-pinned course codes per group */, ['path:' + pathChoiceKey]: string[] /* taken paths (group keys) */ }, perQuarter: 4, useSummer: false }`
 ```
 model = {
   currentTerm, expectedTerm, warnings: string[],
@@ -53,8 +53,14 @@ model = {
              optionCount: number, options: string[] /* all codes, for a search box */,
              selected: boolean,      // true when this group counts toward the plan (see alternatives below)
              altGroupKeys: string[] }], 
-  nodes: [{ code, title, units, status: 'done'|'ip'|'ready'|'locked'|'placeholder',
+  pathChoices: [{ key /* = first group's key */, section, title, pick: number /* k */,
+                  paths: [{ groupKey, name, courses: string[] /* codes the path adds; [] for an unpinned choice/GE path */,
+                            units, choice: boolean /* the path is itself a pick-N-of-M list */, need, placeholder: boolean,
+                            ready: boolean, unmet: number, summary: string /* "BIOENGR 177A + 177B" | "pick 1 of 11 (ETHICS list)" */ }],
+                  chosenPaths: string[] /* group keys */ }],
+  nodes: [{ code, title, units, status: 'done'|'ip'|'ready'|'locked'|'placeholder'|'option',
             term?: 'WI26' /* when taken */, planned?: 'WI27', groupKey?, offered: string, note?: string,
+            pathChoiceKey?, pathGroupKey? /* option nodes; pathChoiceKey also on a path CHOOSE slot */,
             prereqs: string[][] }],
   edges: [{ from, to }],            // prerequisite -> course, only between nodes present
   plan:  [{ term: 'WI27', courses: string[], units: number, beyondExpected: boolean }],
@@ -78,21 +84,31 @@ Group key: `section + '|' + name + '|' + index` (stable across rebuilds).
   "not in course database", "writing credit", "also satisfies Engineering Writing",
   "already planned for <group>, counts for both"). Nothing is labeled recommended.
 - Alternative groups (pick k of a section's groups when it has more than k; same-name groups; `orPrev` pairs)
-  are never auto-resolved: a group is `selected` only when it has a pin (or there is no choice). While fewer than k
-  are pinned, every unpinned group in the set is `selected: false, undecided: true` and the plan holds one
-  `CHOOSE: <section title>` slot per missing pick (units of the smallest alternative). Once k groups have pins the
-  rest are `selected: false, undecided: false` (pinning in one of those switches; the UI drops the rivals' pins).
+  form one **path choice** (`model.pathChoices`); each group is a **path**, taken as a whole bundle. They are never
+  auto-resolved: a group is `selected` only when it is taken, by `opts.choices['path:' + pathChoiceKey]` (first) or
+  by a pin inside it. While fewer than k are taken, every other group in the set is `selected: false, undecided: true`
+  and contributes nothing to the plan; the plan holds one slot per missing pick, named
+  `CHOOSE: <title>[ #i]: <path summary> or <path summary>` over the paths not taken (units of the smallest of them,
+  `pathChoiceKey` set), and each such path's `courses` appear as `option` nodes. Once k are taken the rest are
+  `selected: false, undecided: false` and add no nodes. The UI taking a path drops pins in the paths it leaves.
+  `title` = the common leading words of the path names when there are 2 or more ("BIOENGINEERING CAPSTONE"), else
+  the section title. A path's `ready` = every course's prereqs done/in progress/pinned (choice path: its best
+  option); `unmet` = distinct missing transitive prereqs outside the path itself (choice path: its best option's).
 - Placeholder (GE) groups: unchanged; one `GE: <group name>[ #i]` slot node per needed course until pinned.
 
 ### Pending-decision slots
 Each open slot of a selected choice group is a node `CHOOSE: <group name>[ #i]` (status `placeholder`,
-`groupKey`, units = needUnits/need or 4, no prereqs). A section-level `CHOOSE: <section title>` carries the
-`groupKey` of the first undecided alternative group. These, like `GE:` slots, are scheduled last in the plan so
-unit totals stay honest. The UI draws non-GE `CHOOSE:` slots as one choice node per undecided group instead,
-and puts GE groups' nodes in a separate "General Education" lane.
+`groupKey`, units = needUnits/need or 4, no prereqs). A path-choice `CHOOSE: <title>: A or B` slot carries
+`pathChoiceKey` and the `groupKey` of the first path not taken. These, like `GE:` slots, are scheduled last in the
+plan so unit totals stay honest. The UI draws non-GE `CHOOSE:` slots as one choice node per undecided selected group
+and one path node per path choice instead, and puts GE groups' nodes (and GE path choices' slots) in a separate
+"General Education" lane.
+Option nodes (`status: 'option'`): courses of a path not taken yet. Never planned (no `planned`), not in `plan` or
+`stats`, and they pull in no prereq nodes; edges from prereqs already present are listed.
 Node status: done = taken with a passing grade (`status: done`); ip = in progress; failed, withdrawn and incomplete attempts count as not taken; ready = every prereq AND-group has a done/ip member;
-locked = otherwise; placeholder = GE/elective slot or pending choice. Placeholder node codes: `GE: <group name>`,
-`CHOOSE: <group or section name>`.
+locked = otherwise; placeholder = GE/elective slot or pending choice; option = on an untaken path. Placeholder node
+codes: `GE: <group name>`, `CHOOSE: <group name>`, `CHOOSE: <path choice title>: <summaries>`.
 
 `opts.choices[groupKey]` pins: kept up to `need` per group (UI drops the oldest); a pin must be one of the group's
-`options`. Pinning in an alternative group selects that group.
+`options`. Pinning in an alternative group selects that group (the UI also records it as the taken path).
+`opts.choices['path:' + pathChoiceKey]`: group keys of the taken paths, at most `pick` (UI drops the oldest).

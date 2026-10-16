@@ -81,6 +81,17 @@ button, input { font: inherit; color: inherit; }
 .filter { width: 100%; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); margin: 4px 0; }
 .optlist { max-height: 150px; overflow-y: auto; }
 .card p.small { margin: 4px 0; }
+.path { border: 1px dashed var(--line); border-radius: 6px; padding: 6px 8px; margin: 6px 0; }
+.path.on { border: 1.5px solid var(--done); background: var(--done-bg); }
+.path-h { display: flex; align-items: center; gap: 6px; }
+.path-h .need { margin-left: auto; }
+.path-f { margin-top: 4px; font-size: 12px; }
+.path-f a, .pc a { color: var(--accent); }
+.pc { font-size: 12px; display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+.pc a, .pc b { white-space: nowrap; flex: none; }
+.pc span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.pc small { color: var(--muted); margin-left: auto; flex: none; }
+.pcourse { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 4px; }
 
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 10px; }
 .tabs button { padding: 8px 14px; border: 0; border-bottom: 2px solid transparent; background: none; cursor: pointer; color: var(--muted); }
@@ -120,6 +131,25 @@ button, input { font: inherit; color: inherit; }
 .cchip text { font-size: 11px; fill: var(--fg); }
 .cchip .more { fill: var(--accent); }
 .cchip .dot { fill: var(--locked); } .cchip .dot.ok { fill: var(--done); }
+.node.s-option { opacity: .5; }
+.s-option .box { fill: var(--card); stroke: var(--ph); stroke-dasharray: 4 3; }
+.edge.opt { stroke-dasharray: 4 3; opacity: .6; }
+.plink { fill: none; stroke: var(--ph); stroke-width: 1.2; stroke-dasharray: 1 4; stroke-linecap: round; opacity: .8; }
+.pnode { cursor: pointer; }
+.pnode:focus { outline: none; }
+.pnode .box { fill: var(--card); stroke: var(--ph); stroke-width: 2; stroke-dasharray: 8 5; }
+.pnode.done .box { stroke-dasharray: none; stroke-width: 1.5; }
+.pnode.sel .box, .pnode:focus-visible .box { stroke: var(--accent); stroke-width: 3; }
+.pnode .ch { font-weight: 700; font-size: 12px; fill: var(--ph); }
+.pnode .prow { fill: var(--ph-bg); stroke: none; }
+.pnode .pt { font-size: 11.5px; font-weight: 600; fill: var(--fg); }
+.pnode .csub { font-size: 10px; fill: var(--muted); }
+.pnode .dot { fill: var(--locked); } .pnode .dot.ok { fill: var(--done); }
+.pbtn { cursor: pointer; }
+.pbtn:focus { outline: none; }
+.pbtn rect { fill: var(--accent); }
+.pbtn text { font-size: 10.5px; font-weight: 600; fill: var(--accent-fg); }
+.pbtn:hover rect, .pbtn:focus-visible rect { stroke: var(--fg); stroke-width: 1.5; }
 .lane { stroke: var(--line); stroke-width: 1; }
 .lanet { font-size: 12px; font-weight: 700; fill: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
 .dot { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--locked); align-self: center; font-style: normal; }
@@ -132,6 +162,7 @@ button, input { font: inherit; color: inherit; }
 .legend .s-locked { background: var(--locked-bg); border: 1.5px dashed var(--locked); }
 .legend .s-placeholder { background: var(--ph-bg); border: 1.5px dashed var(--ph); }
 .legend .s-choice { background: var(--ph-bg); border: 1.5px dashed var(--ready); }
+.legend .s-path { background: var(--card); border: 1.5px dashed var(--ph); }
 .legend .blk { height: 0; border-width: 1px; border-color: var(--block); border-radius: 0; }
 
 .plan { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 8px; align-items: flex-start; }
@@ -204,7 +235,7 @@ button, input { font: inherit; color: inherit; }
         <div id="tree" class="scroll"></div>
         <div class="legend">
           <span><i class="s-done"></i>done</span><span><i class="s-ip"></i>in progress</span><span><i class="s-ready"></i>ready now</span>
-          <span><i class="s-locked"></i>locked</span><span><i class="s-placeholder"></i>GE / elective slot</span><span><i class="s-choice"></i>your pick (green dot: prereqs met)</span><span><i class="blk"></i>blocking prerequisite</span>
+          <span><i class="s-locked"></i>locked</span><span><i class="s-placeholder"></i>GE / elective slot</span><span><i class="s-choice"></i>your pick (green dot: prereqs met)</span><span><i class="s-path"></i>choose a path (faded: courses on a path not taken yet)</span><span><i class="blk"></i>blocking prerequisite</span>
         </div>
       </section>
       <section id="plan-view" hidden><div id="plan" class="plan"></div></section>
