@@ -167,7 +167,8 @@
       const c = COURSES[code], t = taken[code];
       nodes.set(code, Object.assign({ code, title: c ? c.t : t ? t.title : code, units: c ? c.u : t ? t.units : 4, offered: c ? c.off : '?', prereqs: c ? c.pre : [] }, c && c.note ? { note: c.note } : {}, c && c.req && !c.pre.length ? { req: c.req } : {}, extra));
     };
-    for (const [code, t] of Object.entries(taken)) if (!ALIAS[code]) add(code, { status: st(t), term: t.term });
+    const viaSrc = new Set(Object.values(taken).map(t => t.via).filter(Boolean));
+    for (const [code, t] of Object.entries(taken)) if (!ALIAS[code] && !viaSrc.has(code)) add(code, { status: st(t), term: t.term });
     for (const gr of groups) if (gr.selected) for (const c of gr.chosen) {
       if (c.code.startsWith('GE: ')) add(c.code, { title: gr.name, units: gr._slotUnits, offered: 'FWS', status: 'placeholder', groupKey: gr.key });
       else add(c.code, { groupKey: chosenBy.get(c.code) || gr.key });
