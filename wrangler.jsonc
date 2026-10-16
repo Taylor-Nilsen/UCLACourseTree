@@ -1,0 +1,9 @@
+{
+  // Cloudflare Workers static-assets deploy (no build step, no Worker code).
+  // Connect this repo in Cloudflare: Workers & Pages > Create > Import a repository.
+  "name": "courseskilltree",
+  "compatibility_date": "2026-10-13",
+  "assets": {
+    "directory": "./"
+  }
+}

@@ -48,6 +48,13 @@ Tests: `npm test` (needs Node, no dependencies).
 
 Export opens a print-ready plan and prerequisite tree; save it as PDF from the print dialog.
 
+## Deploy
+
+The site is static files with no build step. Two ways to host it:
+
+- **Cloudflare (recommended).** `wrangler.jsonc` serves the repo as static assets; `.assetsignore` keeps tests, scripts, docs and git data private. In the Cloudflare dashboard go to Workers & Pages, choose Create, then Import a repository, and pick this repo with no build command. Every push to `main` redeploys. Add a custom domain under the Worker's Settings, Domains & Routes; Cloudflare creates the DNS record when the domain's DNS is on Cloudflare.
+- **GitHub Pages.** `.github/workflows/pages.yml` runs the tests and publishes on every push to `main`. It needs GitHub Actions to run on the repo, so a private repo needs a plan with Actions minutes and Pages for private repos, and a billing account in good standing.
+
 ## Data sources
 
 - UCLA General Catalog, 2026-27: https://catalog.registrar.ucla.edu/ (titles, units, requisites for every course).
