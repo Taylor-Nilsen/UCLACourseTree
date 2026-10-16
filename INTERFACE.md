@@ -44,23 +44,24 @@ already used in parser.js and data/ucla-courses.js.
 - `DARS.termIndex('WI27')` -> sortable int, `DARS.termName(int)` inverse. Quarter order FA, WI, SP, SU within an academic year.
 
 ## model.js must expose `window.MODEL.build(parsed, opts) -> model`
-`opts = { choices: { [groupKey]: string[] /* user-pinned course codes per group */, ['path:' + pathChoiceKey]: string[] /* taken paths (group keys) */ }, perQuarter: 4, useSummer: false }`
+`opts = { choices: { [groupKey]: string[] /* course codes the user selected, per group */, ['path:' + pathChoiceKey]: string[] /* taken paths (group keys) */ },
+        defers: { [code]: 'WI28' /* not before that term */ }, conflicts: [{ a, b, term: 'WI28' }], perQuarter: 4, useSummer: false }`
 ```
 model = {
   currentTerm, expectedTerm, warnings: string[],
   groups: [{ key, section, name, need, taken: string[],
-             chosen: [{ code, auto: boolean, why: string }],           // what the plan uses (auto:false = pinned)
+             chosen: [{ code, auto: boolean, why: string }],           // what the plan uses (auto:false = selected by the user)
              alternatives: [{ code, ready: boolean, unmet: number, why: string }], // choice groups only, see below
              placeholder: boolean,   // true when no option is in COURSES (GE etc) -> plan uses a slot named by group
-             choice: boolean,        // more viable options than needed: the user picks, nothing is auto-chosen
-             undecided: boolean,     // a pick is still pending here (open choice slots, or an unresolved alternative group)
+             choice: boolean,        // more viable options than needed: the user selects, nothing is auto-chosen
+             undecided: boolean,     // a selection is still pending here (open choice slots, or an unresolved alternative group)
              optionCount: number, options: string[] /* all codes, for a search box */,
              selected: boolean,      // true when this group counts toward the plan (see alternatives below)
              altGroupKeys: string[] }], 
   pathChoices: [{ key /* = first group's key */, section, title, pick: number /* k */,
-                  paths: [{ groupKey, name, courses: string[] /* codes the path adds; [] for an unpinned choice/GE path */,
+                  paths: [{ groupKey, name, courses: string[] /* codes the path adds; [] for a choice/GE path with nothing selected */,
                             units, choice: boolean /* the path is itself a pick-N-of-M list */, need, placeholder: boolean,
-                            ready: boolean, unmet: number, summary: string /* "BIOENGR 177A + 177B" | "pick 1 of 11 from ETHICS list" */,
+                            ready: boolean, unmet: number, summary: string /* "BIOENGR 177A + 177B" | "select 1 of 11 from ETHICS list" */,
                             chain: [{ code, pre: string[] /* its prereqs present as nodes, outside the path */,
                                       after: string[] /* courses of the same path it requires */ }] /* courses in prereq order */ }],
                   chosenPaths: string[] /* group keys */ }],
@@ -68,49 +69,52 @@ model = {
             term?: 'WI26' /* when taken */, planned?: 'WI27', groupKey?, offered: string /* COURSES off; the plan only uses these quarters */, req?: string /* catalog text when pre is [] */,
             pathChoiceKey? /* PATH node and path CHOOSE slot */, pathPrereq?: true /* needed only by an undecided path: not planned */,
             fromPath?: string /* pathChoice key: this course / slot belongs to a taken path of a decided path choice */,
-            pickedFor?: string /* groupKey: the user pinned this course in that selected choice group (pick N of M, or a taken list path) */,
+            pickedFor?: string /* groupKey: the user selected this course in that selected choice group (select N of M, or a taken list path) */,
+            critical?: boolean /* planned course: slipping it one offered quarter pushes the last planned quarter past expected graduation,
+                                  puts a course past expected graduation that was not, or leaves one unscheduled */,
+            criticalWhy?: string /* what slipping it pushes back: "your last quarter to FA29, past expected graduation" | "X past expected graduation" */,
+            slack?: number /* planned course: offered quarters it can slip with none of those effects, 0..4 (4 = 4 or more) */,
             prereqs: string[][] }],
   edges: [{ from, to }],            // prerequisite -> course, only between nodes present
   plan:  [{ term: 'WI27', courses: string[], units: number, beyondExpected: boolean }],
+  conflictResolutions: [{ a, b, term, kept: string|null, moved: string|null, movedTo: string|null /* term */, filledBy: string|null, why: string }],
   stats: { unitsEarned, unitsNeeded, plannedUnits, coursesRemaining }
 }
 ```
 Group key: `section + '|' + name + '|' + index` (stable across rebuilds).
 
 ### Selection rules (the model never picks between real options for the user)
-- **Exclusive picks.** Before any group is processed the model maps every pinned course to the group it is pinned in
-  (`pickedBy`; pins in an `A OR B` sub-group, key `<parent key>|...`, belong to the parent). A course picked in one
+- **Exclusive selections.** Before any group is processed the model maps every selected course to the group it is selected in (`pickedBy`; selections in an `A OR B` sub-group, key `<parent key>|...`, belong to the parent). A course selected in one
   group is dropped from every other group's `options` (and so from `alternatives`, choice chips, panels, path options
-  and GE search lists), whatever the document order. If the same course is pinned in two groups, the first group in
-  document order keeps it, the other pin is ignored and a warning names both groups. Exception: an ethics/writing group
-  whose list holds a course picked elsewhere is satisfied by it automatically (`auto: true`, why `picked for <group>;
+  and GE search lists), whatever the document order. If the same course is selected in two groups, the first group in document order keeps it, the other selection is ignored and a warning names both groups. Exception: an ethics/writing group
+  whose list holds a course selected elsewhere is satisfied by it automatically (`auto: true`, why `selected for <group>;
   it is on this list, so it counts here too`), before courses merely required elsewhere; such a group inside a path
-  choice counts as taken. The UI also removes a course from other groups' pins when it is pinned.
-- `viable` options of a group = options minus `notFrom`, minus taken courses, minus courses picked for another group,
+  choice counts as taken. The UI also removes a course from other groups' selections when it is selected.
+- `viable` options of a group = options minus `notFrom`, minus taken courses, minus courses selected for another group,
   minus courses already used by another requirement (ethics/writing groups may reuse them), minus courses with `off === ''`. Courses not in COURSES and
   `off === '?'` stay viable. An option like "32A OR 32AH" is one slot; alts with `off === ''` are dropped from it.
 - `viable <= need`: every viable slot is chosen, `auto: true`, `why` starts `required: N of N` (plus e.g.
   `MATH 32A not offered recently`). Fewer than needed adds the warning "audit lists fewer options than it needs".
   A slot that still has 2+ viable alts becomes its own choice group (need 1, key `<parent key>|A OR B`,
   name `A OR B`), inserted right after its parent.
-- `viable > need`: `choice: true`; `chosen` holds only pins (`auto: false`); `alternatives` lists every unpinned
+- `viable > need`: `choice: true`; `chosen` holds only the user's selections (`auto: false`); `alternatives` lists every unselected
   viable option sorted ready first, then fewest unmet transitive prereqs, then course-number order.
-  `ready` = every prereq AND-group has a done/in-progress/pinned member; `unmet` = count of missing transitive prereqs;
+  `ready` = every prereq AND-group has a done/in-progress/selected member; `unmet` = count of missing transitive prereqs;
   `why` is a short fact ("prereqs met", "no prereqs", "needs 2 prereqs: CHEM 20B, MATH 32A",
   "not in course database", "writing credit", "also satisfies Engineering Writing",
   "already planned for <group>, counts for both"). Nothing is labeled recommended.
 - Alternative groups (pick k of a section's groups when it has more than k; same-name groups; `orPrev` pairs)
   form one **path choice** (`model.pathChoices`); each group is a **path**, taken as a whole bundle. They are never
   auto-resolved: a group is `selected` only when it is taken, by `opts.choices['path:' + pathChoiceKey]` (first) or
-  by a pin inside it. While fewer than k are taken, every other group in the set is `selected: false, undecided: true`
-  and contributes nothing to the plan; the plan holds one slot per missing pick, named
+  by a selection inside it. While fewer than k are taken, every other group in the set is `selected: false, undecided: true`
+  and contributes nothing to the plan; the plan holds one slot per missing selection, named
   `CHOOSE: <title>[ #i]: <path summary> or <path summary>` over the paths not taken (units of the smallest of them,
   `pathChoiceKey` set); untaken paths' courses are not nodes. Once k are taken the rest are
-  `selected: false, undecided: false` and add no nodes. The UI taking a path drops pins in the paths it leaves.
+  `selected: false, undecided: false` and add no nodes. The UI taking a path drops selections in the paths it leaves.
   `title` = the common leading words of the path names when there are 2 or more ("BIOENGINEERING CAPSTONE"), else
-  the section title. A path's `ready` = every course's prereqs done/in progress/pinned (choice path: its best
+  the section title. A path's `ready` = every course's prereqs done/in progress/selected (choice path: its best
   option); `unmet` = distinct missing transitive prereqs outside the path itself (choice path: its best option's).
-- Placeholder (GE) groups: unchanged; one `GE: <group name>[ #i]` slot node per needed course until pinned.
+- Placeholder (GE) groups: unchanged; one `GE: <group name>[ #i]` slot node per needed course until one is selected.
 
 ### Pending-decision slots
 Each open slot of a selected choice group is a node `CHOOSE: <group name>[ #i]` (status `placeholder`,
@@ -138,9 +142,38 @@ Node status: done = taken with a passing grade (`status: done`); ip = in progres
 locked = otherwise; placeholder = GE/elective slot or pending choice; path = a path choice card. Placeholder node
 codes: `GE: <group name>`, `CHOOSE: <group name>`, `CHOOSE: <path choice title>: <summaries>`.
 
-`opts.choices[groupKey]` pins: kept up to `need` per group (UI drops the oldest); a pin must be one of the group's
-`options`. A pinned course of a selected choice group carries `pickedFor`; the UI tags its box "pick · <group name>"
-with a ⇄ button (`aria-label="Change pick for <group name>"`) that opens that group's option panel (it does not unpin),
-and the course detail shows "Picked for: <group name>" with a "Change pick" button to the same panel. The panel says
-"N more to pick" while slots are open, and which pin a new pick replaces once the group is full. Pinning in an alternative group selects that group (the UI also records it as the taken path).
+`opts.choices[groupKey]` selections: kept up to `need` per group (UI drops the oldest); a selection must be one of the group's
+`options`. A course the user selected in a selected choice group carries `pickedFor`; the UI tags its box "selected · <group name>"
+with a ⇄ button (`aria-label="Change selection for <group name>"`) that opens that group's option panel (it does not unselect),
+and the course detail shows "Selected for: <group name>" with a "Change selection" button to the same panel. The panel says "N more to select" while slots are open, and which selection a new one replaces once the group is full. Selecting in an alternative group selects that group (the UI also records it as the taken path).
 `opts.choices['path:' + pathChoiceKey]`: group keys of the taken paths, at most `pick` (UI drops the oldest).
+
+### Scheduling constraints (`opts.defers`, `opts.conflicts`) and `MODEL.previewChange`
+The scheduler is greedy: quarter by quarter from the one after `currentTerm` (summers only with `useSummer`), it takes up
+to `perQuarter` eligible courses in one fixed priority order (longest chain of later courses, then most direct dependents,
+then units); `GE:`/`CHOOSE:` slots fill what is left. Eligible = offered that quarter (`'?'` = any), every prereq AND-group
+met in an earlier quarter, and not excluded by a constraint. It is re-run (not the whole build) for every what-if below.
+- `defers[code] = term`: not before `term`, still only in offered quarters. A code that is not a schedulable course in the
+  plan, or a bad term, is ignored with a warning ("Ignored your deferral of ...").
+- `conflicts[i] = { a, b, term }`: a and b can't both sit in `term` (a section-time clash). Applied in array order. If both
+  are planned there, the plan is built twice, once with a barred from `term` and once with b, and scored, in order, by:
+  unscheduled courses, last planned term, courses newly past expected graduation, other courses whose term changed,
+  total quarter shift (summers skipped unless `useSummer`); lower wins. A full tie keeps `a` (the first-named, the one the
+  user started from) and moves `b`. The loser is barred from `term` from then on; the freed seat goes to whatever the
+  scheduler takes next (`filledBy`). `why`: "Kept A: it unlocks 3 later courses; moving B instead changes nothing else."
+  (or "moving it delays your last quarter to SP29" when A unlocks nothing). If they no longer share `term`, `kept` and
+  `moved` are null and `why` starts "No clash now". Bad entries are ignored with a warning ("Ignored your conflict ...").
+- `critical`/`slack` are computed on the final plan with the constraints in force: the course is slipped to its next
+  offered quarter, then the next, up to 4 times, re-running the scheduler each time.
+
+`MODEL.previewChange(parsed, opts, change) -> { before, after, opts, diff }` (pure; `opts` is the input with the change
+applied, ready to persist). `change`: `{ type: 'defer', code }` (to the next offered quarter after its planned one),
+`{ type: 'conflict', a, b, term }`, `{ type: 'undefer', code }`, `{ type: 'unconflict', a, b, term }` (the pair in either order).
+`diff = { finalTermBefore, finalTermAfter, pastExpected: string[] /* newly past expected */, moved: [{ code, from, to }],
+unschedulable: string[] /* planned before, not after */, severity }`. `severity` is `'major'` when the last planned term
+moves later, a course becomes past expected or unschedulable, or 3+ other courses move (the changed course(s) and
+`GE:`/`CHOOSE:` slots don't count); `'minor'` when 1-2 other courses move; else `'none'`.
+UI: minor/none apply at once with an 8 s Undo toast; major applies and opens a modal ("This change causes scheduling
+problems", Undo focused, Esc = Undo, "Continue anyway"). Removing a constraint asks only when the removal is major.
+Plan chips: » defers, ≠ starts conflict mode (then click a class in the same quarter); a red `*` in the upper-left corner marks
+`critical` (also on Tree nodes; a black `*` in the export).

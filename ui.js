@@ -53,16 +53,16 @@
   if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
   const NW = 200, NH = 56, COLW = 340, ROWH = 110, PAD = 40, CW = 240, CHIPW = 108, MAXCHIPS = 8, PW = 300, PROW = 46, TAGH = 22;
-  const STATUS = { done: 'Completed', ip: 'In progress', ready: 'Ready now', locked: 'Locked', placeholder: 'GE / elective slot', path: 'Pick one' };
+  const STATUS = { done: 'Completed', ip: 'In progress', ready: 'Ready now', locked: 'Locked', placeholder: 'GE / elective slot', path: 'Select one' };
   const QTR = { F: 'Fall', W: 'Winter', S: 'Spring' };
   const PIN_D = 'M10 1l5 5-2 1-3 3 .5 3.5L9 15l-3-3-4 4-1-1 4-4-3-3 1.5-1.5L7 6l3-3z';
-  const PIN = '<svg class="pin" viewBox="0 0 16 16" aria-label="pinned"><path d="M10 1l5 5-2 1-3 3 .5 3.5L9 15l-3-3-4 4-1-1 4-4-3-3 1.5-1.5L7 6l3-3z" fill="currentColor"/></svg>';
+  const PIN = '<svg class="selicon" viewBox="0 0 16 16" aria-label="selected"><path d="M10 1l5 5-2 1-3 3 .5 3.5L9 15l-3-3-4 4-1-1 4-4-3-3 1.5-1.5L7 6l3-3z" fill="currentColor"/></svg>';
 
   const saved = store.get('dars.opts') || {};
   const S = {
     parsed: null, model: null, tab: 'tree', zoom: 1, detail: null,
-    opts: { choices: saved.choices || {}, perQuarter: saved.perQuarter || 4, useSummer: !!saved.useSummer },
-    altOpen: {}, filters: {},
+    opts: { choices: saved.choices || {}, defers: saved.defers || {}, conflicts: saved.conflicts || [], perQuarter: saved.perQuarter || 4, useSummer: !!saved.useSummer },
+    altOpen: {}, filters: {}, conflictFrom: null /* { code, term } while the user selects the other class */, modal: null,
   };
 
   // ---------- loading ----------
@@ -84,7 +84,7 @@
     const parsed = DARS.parse(lines); // never throws; ok:false carries a reason
     S.diag = { parsed, lines };
     if (!parsed.ok) { showError(parsed.reason); $('#error').insertAdjacentHTML('beforeend', ' ' + DIAG); return; }
-    if (fresh) { S.opts.choices = {}; S.detail = null; }
+    if (fresh) { S.opts.choices = {}; S.opts.defers = {}; S.opts.conflicts = []; S.detail = null; S.conflictFrom = null; }
     S.parsed = parsed;
     store.set('dars.lines', lines); saveOpts();
     rebuild();
@@ -92,11 +92,12 @@
 
   function rebuild() {
     if (!window.MODEL) return showError('The planner (model.js) failed to load.');
-    try { S.model = MODEL.build(S.parsed, { choices: S.opts.choices, perQuarter: S.opts.perQuarter, useSummer: S.opts.useSummer }); }
+    try { S.model = MODEL.build(S.parsed, buildOpts()); }
     catch (e) { console.error(e); return showError('Could not build a plan from this audit: ' + e.message); }
     render();
   }
 
+  const buildOpts = () => ({ choices: S.opts.choices, defers: S.opts.defers, conflicts: S.opts.conflicts, perQuarter: S.opts.perQuarter, useSummer: S.opts.useSummer });
   function saveOpts() { store.set('dars.opts', S.opts); }
   function commit() { saveOpts(); rebuild(); }
 
@@ -135,7 +136,7 @@
   const dept = c => (DARS.splitCode(c) || {}).dept;
   const chainText = (p, label) => (p.chain || []).map((x, i, a) => (i ? (x.after.length ? ' → ' : ' + ') : '') + label(x.code, i ? a[i - 1].code : null)).join('');
   const pathLine = p => p.choice ? p.summary : chainText(p, (c, prev) => prev && dept(c) === dept(prev) ? c.slice(dept(c).length + 1) : c);
-  const pickHead = pc => `Pick ${pc.pick} of ${pc.paths.length}`;
+  const pickHead = pc => `Select ${pc.pick} of ${pc.paths.length}`;
   const isGEpc = pc => pc.paths.every(p => p.placeholder);
   const pathNeeds = p => p.ready ? 'prereqs met' : `needs ${p.unmet} prereq${p.unmet === 1 ? '' : 's'}`;
   const isPinned = (key, code) => (S.opts.choices[key] || []).includes(code);
@@ -150,7 +151,7 @@
     if (g.choice) return pins.concat(g.alternatives || []);
     return pins.concat((g.chosen || []).filter(c => c.auto && !c.code.startsWith('GE: ')).map(c => ({ code: c.code, why: c.why, ready: readyNow(c.code) })));
   }
-  const pickLabel = g => g.undeclared ? `Declare an area · ${g.need} course${g.need === 1 ? '' : 's'}` : `Pick ${g.need} of ${choiceOpts(g).length}`;
+  const pickLabel = g => g.undeclared ? `Declare an area · ${g.need} course${g.need === 1 ? '' : 's'}` : `Select ${g.need} of ${choiceOpts(g).length}`;
   function preHtml(prereqs, nm) {
     return (prereqs || []).map(og => '<li>' + og.map(c => {
       const s = statusOf(c, nm);
@@ -200,31 +201,31 @@
 
   function optRow(key, code, why, act, cls, ready) {
     const dot = ready === undefined ? '' : `<i class="dot ${ready ? 'ok' : ''}" title="${ready ? 'prereqs met' : 'prereqs missing'}"></i>`;
-    return `<button class="opt ${cls || ''}" data-act="${act}" data-key="${esc(key)}" data-code="${esc(code)}" title="${act === 'unpin' ? 'Click to unpin' : 'Click to pin'}">` +
-      `${act === 'unpin' ? PIN : dot}<b>${esc(code)}</b>${why ? ` <small title="${esc(why)}">${esc(why)}</small>` : ''}</button>`;
+    return `<button class="opt ${cls || ''}" data-act="${act}" data-key="${esc(key)}" data-code="${esc(code)}" title="${act === 'unselect' ? 'Click to unselect' : 'Click to select'}">` +
+      `${act === 'unselect' ? PIN : dot}<b>${esc(code)}</b>${why ? ` <small title="${esc(why)}">${esc(why)}</small>` : ''}</button>`;
   }
 
   function optionList(g) {
     const q = (S.filters[g.key] || '').trim().toUpperCase(), pinned = S.opts.choices[g.key] || [];
     const hits = (g.options || []).filter(c => !q || c.includes(q));
-    return hits.slice(0, 150).map(c => optRow(g.key, c, '', pinned.includes(c) ? 'unpin' : 'pin', pinned.includes(c) ? 'on' : '')).join('') +
+    return hits.slice(0, 150).map(c => optRow(g.key, c, '', pinned.includes(c) ? 'unselect' : 'select', pinned.includes(c) ? 'on' : '')).join('') +
       (hits.length > 150 ? `<p class="muted small">Showing 150 of ${hits.length}. Type to narrow.</p>` : hits.length ? '' : '<p class="muted small">No matches.</p>');
   }
 
   function cardBody(g) {
     let h = (g.taken || []).map(c => `<div class="tk">✓ ${esc(c)}</div>`).join('');
     if (g.placeholder) {
-      h += (g.chosen || []).map(c => optRow(g.key, c.code, c.why, c.auto ? 'pin' : 'unpin', 'chosen')).join('');
-      return h + `<p class="muted small">pick ${esc(g.need)} of ${esc(g.optionCount)} options</p>
+      h += (g.chosen || []).map(c => optRow(g.key, c.code, c.why, c.auto ? 'select' : 'unselect', 'chosen')).join('');
+      return h + `<p class="muted small">select ${esc(g.need)} of ${esc(g.optionCount)} options</p>
         <input type="search" class="filter" data-filter="${esc(g.key)}" placeholder="Filter options" value="${esc(S.filters[g.key] || '')}">
         <div class="optlist" data-list="${esc(g.key)}">${optionList(g)}</div>`;
     }
-    if (!g.choice) return h + (g.chosen || []).map(c => optRow(g.key, c.code, c.why, c.auto ? 'pin' : 'unpin', 'chosen')).join('');
-    // choice group: the owner picks; show every viable option, ready ones first
+    if (!g.choice) return h + (g.chosen || []).map(c => optRow(g.key, c.code, c.why, c.auto ? 'select' : 'unselect', 'chosen')).join('');
+    // choice group: the owner selects; show every viable option, ready ones first
     const pins = g.chosen.filter(c => !c.auto), alts = g.alternatives || [], M = pins.length + alts.length;
-    h += pins.length ? `<p class="small">your pick: ${pins.map(c => esc(c.code)).join(', ')}</p>` + pins.map(c => optRow(g.key, c.code, c.why, 'unpin', 'chosen')).join('')
-      : '<p class="small muted">no pick yet</p>';
-    const rows = alts.map(a => optRow(g.key, a.code, a.why, 'pin', '', a.ready)).join('');
+    h += pins.length ? `<p class="small">your selection: ${pins.map(c => esc(c.code)).join(', ')}</p>` + pins.map(c => optRow(g.key, c.code, c.why, 'unselect', 'chosen')).join('')
+      : '<p class="small muted">nothing selected yet</p>';
+    const rows = alts.map(a => optRow(g.key, a.code, a.why, 'select', '', a.ready)).join('');
     const open = S.altOpen[g.key] ?? M - g.need <= 6;
     h += `<details class="alts" data-key="${esc(g.key)}"${open ? ' open' : ''}><summary>show ${M} options</summary>${rows}</details>`;
     return h + `<button class="btn sm" data-group="${esc(g.key)}">compare prereqs</button>`;
@@ -237,7 +238,7 @@
       const on = pc.chosenPaths.includes(p.groupKey), g = groupByKey(p.groupKey);
       const cs = p.courses.map(c => `<div class="pc">${nm[c] ? `<a href="#" data-node="${esc(c)}">${esc(c)}</a>` : `<b>${esc(c)}</b>`} <span>${esc(titleOf(c, nm))}</span> <small>${esc((nm[c] || {}).planned || '')}</small></div>`).join('');
       const body = p.choice ? (on ? cardBody(g) : done ? '' : `<details class="alts"><summary>show options</summary>${cardBody(g)}</details>`) : on ? cs : '';
-      const act = on ? `<a href="#" class="small" data-change="${esc(pc.key)}">change</a>` : `<button class="btn sm" data-take="${esc(p.groupKey)}" data-pc="${esc(pc.key)}">${done ? 'switch' : 'Pick'}</button>`;
+      const act = on ? `<a href="#" class="small" data-change="${esc(pc.key)}">change</a>` : `<button class="btn sm" data-take="${esc(p.groupKey)}" data-pc="${esc(pc.key)}" aria-label="${esc((done ? 'Switch to this path: ' : 'Select this path: ') + pathLine(p))}">${done ? 'switch' : 'Select'}</button>`;
       return `<div class="path${on ? ' on' : done ? ' off' : ''}"><div class="path-h"><i class="dot${p.ready ? ' ok' : ''}" title="${esc(pathNeeds(p))}"></i>
         <span>${esc(pathLine(p))} · ${esc(p.units)} u</span>${act}</div>${done ? '' : `<div class="small muted">${esc(pathNeeds(p))}</div>`}${body}</div>`;
     }).join('');
@@ -324,15 +325,15 @@
     <g class="pbtn" ${attrs} transform="translate(${w - 38},${y})" tabindex="0" role="button" aria-label="${esc(aria)}"><title>${esc(aria)}</title><rect width="30" height="18" rx="9"/><text x="15" y="13" text-anchor="middle">⇄</text></g>`;
   // "path · TITLE  ⇄" inside a box that came from a taken path; ⇄ clears the path choice (the card comes back)
   const pathTag = (pc, w, h) => tagRow('path · ' + pc.title, `data-change="${esc(pc.key)}"`, 'Change path for ' + pc.title, w, h - 24);
-  // "pick · GROUP  ⇄" on a course picked in a pick-N-of-M group; ⇄ opens that group's options (it does not unpin)
-  const pickTag = (g, w, y) => tagRow('pick · ' + g.name, `data-group="${esc(g.key)}"`, 'Change pick for ' + g.name, w, y);
+  // "selected · GROUP  ⇄" on a course selected in a select-N-of-M group; ⇄ opens that group's options (it does not unselect)
+  const pickTag = (g, w, y) => tagRow('selected · ' + g.name, `data-group="${esc(g.key)}"`, 'Change selection for ' + g.name, w, y);
   function choiceSvg(g, p) {
     const opts = choiceOpts(g), shown = opts.length > MAXCHIPS + 1 ? opts.slice(0, MAXCHIPS) : opts, more = opts.length - shown.length;
     const top = 32;
     const chip = (i, inner, attrs) => { const x = 8 + (i % 2) * (CHIPW + 8), y = top + Math.floor(i / 2) * 24;
       return `<g class="cchip" ${attrs} transform="translate(${x},${y})" tabindex="0" role="button"><rect width="${CHIPW}" height="20" rx="10"/>${inner}</g>`; };
     const chips = shown.map((o, i) => chip(i, `<circle class="dot${o.ready ? ' ok' : ''}" cx="11" cy="10" r="4"/><text x="20" y="14">${esc(trunc(o.code, 15))}</text>${o.pinned ? `<path class="pinp" transform="translate(${CHIPW - 16},4) scale(.75)" d="${PIN_D}"/>` : ''}`,
-      `data-act="${o.pinned ? 'unpin' : 'pin'}" data-key="${esc(g.key)}" data-code="${esc(o.code)}" aria-label="${esc((o.pinned ? 'Unpin ' : 'Pin ') + o.code + (o.ready ? ', prereqs met' : ', prereqs missing'))}"`)).join('') +
+      `data-act="${o.pinned ? 'unselect' : 'select'}" data-key="${esc(g.key)}" data-code="${esc(o.code)}" aria-label="${esc((o.pinned ? 'Unselect ' : 'Select ') + o.code + (o.ready ? ', prereqs met' : ', prereqs missing'))}"`)).join('') +
       (more ? chip(shown.length, `<text class="more" x="${CHIPW / 2}" y="14" text-anchor="middle">+${more} more</text>`, `data-group="${esc(g.key)}" aria-label="All ${opts.length} options"`) : '');
     return `<g class="cnode${S.detail === 'g:' + g.key ? ' sel' : ''}" data-group="${esc(g.key)}" transform="translate(${p.x},${p.y})" tabindex="0" role="button" aria-label="${esc(pickLabel(g) + ', ' + g.name)}">
       <title>${esc(pickLabel(g) + ' · ' + g.name)}</title><rect class="box" width="${CW}" height="${p.h}" rx="10"/>
@@ -340,20 +341,20 @@
       ${chips}${takenPathOf(g.key) ? pathTag(takenPathOf(g.key).pc, CW, p.h) : ''}</g>`;
   }
 
-  // path card (only while undecided): header "Pick 1 of 2 · TITLE", one row per path with a Pick button. With pick k > 1, a
+  // path card (only while undecided): header "Select 1 of 2 · TITLE", one row per path with a Select button. With pick k > 1, a
   // path already taken lists its courses with their planned quarters and "change".
   const pathHeight = pc => 32 + pc.paths.length * PROW;
   function pathSvg(pc, pos, nm) {
     const btn = (y, attrs, label, w) => `<g class="pbtn" ${attrs} transform="translate(${PW - w - 12},${y})" tabindex="0" role="button"><rect width="${w}" height="18" rx="9"/><text x="${w / 2}" y="13" text-anchor="middle">${esc(label)}</text></g>`;
-    const take = (p, y, label) => btn(y, `data-take="${esc(p.groupKey)}" data-pc="${esc(pc.key)}" aria-label="${esc(label + ': ' + pathLine(p))}"`, label, label.length * 6.5 + 18);
+    const take = (p, y, label) => btn(y, `data-take="${esc(p.groupKey)}" data-pc="${esc(pc.key)}" aria-label="${esc('Select this path: ' + pathLine(p))}"`, label, label.length * 6.5 + 18);
     const line = p => `${pathLine(p)} · ${p.units} u`;
     // chosen row, second line: "177A FA27 → 177B WI28"; a list path not pinned yet: its slot's quarter and a link to the list
     const quarters = p => {
       const q = c => `<tspan class="q">${esc((nm[c] || {}).planned || (nm[c] || {}).term || '')}</tspan>`;
       if ((p.chain || []).length) return `<text class="qs" x="30" y="Y">${chainText(p, c => esc(dept(c) ? c.slice(dept(c).length + 1) : c) + ' ' + q(c))}</text>`;
       const slot = S.model.nodes.find(n => n.groupKey === p.groupKey && !n.code.startsWith('PATH: '));
-      const t = `<text class="qs${p.placeholder ? '' : ' plink'}" x="30" y="Y">${p.placeholder ? 'any course from the list' : 'pick the course ›'}${slot ? ' ' + q(slot.code) : ''}</text>`;
-      return p.placeholder ? t : `<g class="qlink" data-group="${esc(p.groupKey)}" role="button" tabindex="0" aria-label="Pick the course">${t}</g>`;
+      const t = `<text class="qs${p.placeholder ? '' : ' plink'}" x="30" y="Y">${p.placeholder ? 'any course from the list' : 'select the course ›'}${slot ? ' ' + q(slot.code) : ''}</text>`;
+      return p.placeholder ? t : `<g class="qlink" data-group="${esc(p.groupKey)}" role="button" tabindex="0" aria-label="Select the course">${t}</g>`;
     };
     let y = 32;
     const rows = pc.paths.map(p => {
@@ -362,8 +363,8 @@
       const head = `<rect class="prow${on ? ' on' : ''}" x="8" y="${y0}" width="${PW - 16}" height="${PROW - 6}" rx="6"/>
         <circle class="dot${p.ready ? ' ok' : ''}" cx="20" cy="${y0 + 14}" r="4"><title>${esc(pathNeeds(p))}</title></circle>
         <text class="pt" x="30" y="${y0 + 18}">${esc(trunc(line(p), on ? 34 : 33))}</text>`;
-      return head + (on ? quarters(p).replace('y="Y"', `y="${y0 + 34}"`) + btn(y0 + 4, `data-change="${esc(pc.key)}" aria-label="Change your pick"`, 'change', 56)
-        : `<text class="csub" x="30" y="${y0 + 34}">${esc(pathNeeds(p))}</text>` + take(p, y0 + 11, 'Pick'));
+      return head + (on ? quarters(p).replace('y="Y"', `y="${y0 + 34}"`) + btn(y0 + 4, `data-change="${esc(pc.key)}" aria-label="Change your selection"`, 'change', 56)
+        : `<text class="csub" x="30" y="${y0 + 34}">${esc(pathNeeds(p))}</text>` + take(p, y0 + 11, 'Select'));
     }).join('');
     const head = `${pickHead(pc)} · ${pc.title}`;
     return `<g class="pnode${S.detail === 'p:' + pc.key ? ' sel' : ''}" data-path="${esc(pc.key)}" transform="translate(${pos.x},${pos.y})" tabindex="0" role="button" aria-label="${esc(head)}">
@@ -391,8 +392,8 @@
     const ns = nodes.filter(n => n.status !== 'path').concat(lane).map(n => {
       const p = pos[n.code], chip = n.planned || n.term || '', ready = n.status === 'ready', pinned = n.groupKey && isPinned(n.groupKey, n.code);
       const cw = chip ? chip.length * 6.2 + 12 : 0, label = n.code.startsWith('CHOOSE: ') ? 'choose: ' + n.title : n.code, fp = n.fromPath && pcByKey(n.fromPath), pf = n.pickedFor && groupByKey(n.pickedFor);
-      return `<g class="node s-${esc(n.status)}${S.detail === n.code ? ' sel' : ''}" data-node="${esc(n.code)}" transform="translate(${p.x},${p.y})" tabindex="0" role="button" aria-label="${esc(n.code + ', ' + (STATUS[n.status] || n.status) + (pinned ? ', pinned' : ''))}">
-        <title>${esc(n.code + ' — ' + n.title)}</title><rect class="box" width="${NW}" height="${p.h}" rx="8"/>
+      return `<g class="node s-${esc(n.status)}${S.detail === n.code ? ' sel' : ''}" data-node="${esc(n.code)}" transform="translate(${p.x},${p.y})" tabindex="0" role="button" aria-label="${esc(n.code + ', ' + (STATUS[n.status] || n.status) + (pinned ? ', selected' : '') + (n.critical ? '. ' + critText(n) : ''))}">
+        <title>${esc(n.code + ' — ' + n.title + (n.critical ? '\n* ' + critText(n) : ''))}</title><rect class="box" width="${NW}" height="${p.h}" rx="8"/>${n.critical ? '<text class="crit" x="-7" y="13" aria-hidden="true">*</text>' : ''}
         ${pinned ? `<path class="pinp" transform="translate(8,10) scale(.8)" d="${PIN_D}"/>` : ''}
         <text class="code" x="${pinned ? 24 : 10}" y="22">${esc(trunc(label, Math.floor((NW - cw - (pinned ? 32 : 18)) / 7.8)))}</text>
         <text class="ttl" x="10" y="42">${esc(trunc(n.title, ready ? 20 : n.status === "placeholder" ? 27 : 31))}</text>${ready ? `<text class="rdy" x="${NW - 10}" y="42" text-anchor="end">ready now</text>` : ''}
@@ -414,18 +415,88 @@
     $('#zoomg').setAttribute('transform', `scale(${S.zoom})`);
   }
 
+  const isSlotCode = c => /^(GE|CHOOSE): /.test(c);
+  const critText = n => 'Must be taken this quarter: delaying it pushes back ' + n.criticalWhy;
   function renderPlan() {
-    const nm = nodeMap();
-    const chipFor = c => {
+    const nm = nodeMap(), cf = S.conflictFrom;
+    const chipFor = (c, term) => {
       const n = nm[c] || {};
       if (c.startsWith('CHOOSE: ')) return `<button class="pchip choose" ${n.pathChoiceKey ? `data-path="${esc(n.pathChoiceKey)}"` : isGE(n) ? `data-node="${esc(c)}"` : `data-group="${esc(n.groupKey)}"`} title="Decision pending: open the options"><b>choose: ${esc(n.title)}</b><small>${esc(n.units ?? '')} u</small></button>`;
-      return `<button class="pchip s-${esc(n.status || '')}" data-node="${esc(c)}"><b>${esc(c)}</b><span>${esc(titleOf(c, nm))}</span><small>${esc(n.units ?? '')} u</small></button>`;
+      const real = !isSlotCode(c), target = real && cf && cf.term === term && cf.code !== c;
+      const crit = n.critical ? `<span class="crit" role="img" aria-label="${esc(critText(n))}" title="${esc(critText(n))}">*</span>` : '';
+      const acts = real ? `<span class="pacts"><button type="button" class="pact" data-defer="${esc(c)}" aria-label="Defer ${esc(c)} to the next quarter it is offered" title="Defer to the next quarter it is offered">»</button><button type="button" class="pact" data-conflict="${esc(c)}" data-term="${esc(term)}" aria-label="Conflict: mark a class that clashes with ${esc(c)} in ${esc(term)}" title="Conflict…">≠</button></span>` : '';
+      return `<div class="pwrap${target ? ' target' : ''}${cf && cf.code === c && cf.term === term ? ' source' : ''}">${crit}<button class="pchip s-${esc(n.status || '')}" data-node="${esc(c)}"${target ? ` data-cpick="${esc(c)}" aria-label="${esc(c + ' conflicts with ' + cf.code)}"` : ''}><b>${esc(c)}</b><span>${esc(titleOf(c, nm))}</span><small>${esc(n.units ?? '')} u</small></button>${acts}</div>`;
     };
+    const st = $('#cfstatus');
+    st.hidden = !cf;
+    st.innerHTML = cf ? `Select the class that conflicts with <b>${esc(cf.code)}</b> in ${esc(cf.term)} <span class="muted">(Esc to cancel)</span> <button type="button" class="btn sm" data-cfcancel>Cancel</button>` : '';
+    renderConstraints();
     $('#plan').innerHTML = (S.model.plan || []).map(t => `<div class="term${t.beyondExpected ? ' late' : ''}">
       <div class="term-h"><b>${esc(t.term)}</b><span>${esc(t.units)} units</span></div>
       ${t.beyondExpected ? '<span class="tag-late">past expected graduation</span>' : ''}
-      ${t.courses.map(chipFor).join('') || '<p class="muted small">No courses</p>'}
+      ${t.courses.map(c => chipFor(c, t.term)).join('') || '<p class="muted small">No courses</p>'}
     </div>`).join('') || '<p class="muted pad">Nothing left to plan.</p>';
+  }
+
+  // "Your scheduling constraints": each defer and conflict (with the model's reason) and a × that removes it
+  function renderConstraints() {
+    const d = Object.entries(S.opts.defers || {}), cs = S.opts.conflicts || [], res = S.model.conflictResolutions || [], box = $('#constraints');
+    box.hidden = !d.length && !cs.length;
+    const x = (attrs, label) => `<button type="button" class="cx" ${attrs} aria-label="${esc(label)}" title="${esc(label)}">×</button>`;
+    box.innerHTML = box.hidden ? '' : '<h3>Your scheduling constraints</h3><ul>' +
+      d.map(([c, t]) => `<li><span>Defer <b>${esc(c)}</b> to ${esc(t)} or later</span>${x(`data-undefer="${esc(c)}"`, 'Remove deferral of ' + c)}</li>`).join('') +
+      cs.map((c, i) => { const r = res.find(r => r.term === c.term && r.a === c.a && r.b === c.b);
+        return `<li><span>Conflict in ${esc(c.term)}: <b>${esc(c.a)}</b> and <b>${esc(c.b)}</b><br><small class="muted">${esc(r ? r.why : 'Ignored: one of these is no longer in the plan.')}</small></span>${x(`data-unconflict="${i}"`, `Remove conflict between ${c.a} and ${c.b}`)}</li>`; }).join('') + '</ul>';
+  }
+
+  // ---------- scheduling changes: preview, then apply; major ones ask (modal), the rest offer Undo (toast) ----------
+  const shortCode = c => trunc(c, 44);
+  function tryChange(change) {
+    const prev = { opts: JSON.parse(JSON.stringify(S.opts)), model: S.model };
+    let r;
+    try { r = MODEL.previewChange(S.parsed, buildOpts(), change); } catch (e) { console.error(e); return showError('Could not apply that change: ' + e.message); }
+    S.opts.defers = r.opts.defers; S.opts.conflicts = r.opts.conflicts; S.conflictFrom = null;
+    saveOpts(); S.model = r.after; render();
+    if (r.diff.severity === 'major') return showModal(r.diff, prev);
+    if (change.type === 'defer' || change.type === 'conflict') showToast(changeText(change, r), prev);
+  }
+  function changeText(ch, r) {
+    const mv = r.diff.moved, own = mv.find(x => x.code === ch.code);
+    const others = mv.filter(x => ![ch.code, ch.a, ch.b].includes(x.code));
+    const say = list => list.slice(0, 3).map(x => `${shortCode(x.code)} moved to ${x.to}${own && x.to === own.from ? ' to fill the slot' : ''}.`).join(' ') + (list.length > 3 ? ` ${list.length - 3} more moved.` : '');
+    if (ch.type === 'defer') return own ? `Deferred ${ch.code} to ${own.to}. ${say(others)}`.trim() : `${ch.code} could not be deferred.`;
+    const res = (r.after.conflictResolutions || []).find(x => x.term === ch.term && x.a === ch.a && x.b === ch.b);
+    if (!res || !res.kept) return res ? res.why : 'Conflict saved.';
+    return `Kept ${res.kept} in ${ch.term}; ${res.moved} moved to ${res.movedTo || 'nowhere'}.` + (res.filledBy ? ` ${shortCode(res.filledBy)} moved to ${ch.term} to fill the slot.` : '');
+  }
+  function undo(prev) { S.opts = prev.opts; saveOpts(); S.model = prev.model; render(); }
+  let toastTimer = null;
+  function showToast(text, prev) {
+    const t = $('#toast');
+    clearTimeout(toastTimer);
+    t.innerHTML = `<span>${esc(text)}</span><button type="button" class="btn sm" data-toastundo>Undo</button>`;
+    t.hidden = false; S.toastPrev = prev;
+    toastTimer = setTimeout(() => { t.hidden = true; S.toastPrev = null; }, 8000);
+  }
+  function showModal(diff, prev) {
+    const li = xs => '<ul>' + xs.map(x => `<li>${x}</li>`).join('') + '</ul>';
+    $('#toast').hidden = true;
+    $('#modal-b').innerHTML = `<p><b>Graduation</b> (last planned quarter): ${esc(diff.finalTermBefore || '—')} → ${esc(diff.finalTermAfter || '—')}</p>` +
+      (diff.pastExpected.length ? `<p><b>Now past expected graduation (${esc(S.model.expectedTerm)}):</b></p>${li(diff.pastExpected.map(esc))}` : '') +
+      (diff.unschedulable.length ? `<p><b>Can no longer be scheduled:</b></p>${li(diff.unschedulable.map(esc))}` : '') +
+      (diff.moved.length ? `<p><b>Courses that move:</b></p>${li(diff.moved.map(x => `${esc(shortCode(x.code))}: ${esc(x.from)} → ${esc(x.to)}`))}` : '');
+    S.modal = { prev, focus: document.activeElement };
+    ['header.bar', '#app', '#detail'].forEach(q => { $(q).inert = true; });
+    $('#modal').hidden = false;
+    $('#modal [data-modal="undo"]').focus();
+  }
+  function closeModal(doUndo) {
+    const m = S.modal; if (!m) return;
+    S.modal = null; $('#modal').hidden = true;
+    ['header.bar', '#app', '#detail'].forEach(q => { $(q).inert = false; });
+    if (doUndo) undo(m.prev);
+    const back = m.focus && document.contains(m.focus) ? m.focus : $('[data-tab="plan"]');
+    if (back) back.focus();
   }
 
   function groupDetail(g, nm) {
@@ -433,22 +504,22 @@
       const c = course(o.code) || {}, pre = preHtml(c.pre, nm);
       return `<div class="optd${o.pinned ? ' on' : ''}"><div class="optd-h">${o.pinned ? PIN : `<i class="dot${o.ready ? ' ok' : ''}" title="${o.ready ? 'prereqs met' : 'prereqs missing'}"></i>`}
         <b>${nm[o.code] ? `<a href="#" data-node="${esc(o.code)}">${esc(o.code)}</a>` : esc(o.code)}</b><span class="muted small">${esc(c.u ?? '?')} u</span>
-        <button class="btn sm" data-act="${o.pinned ? 'unpin' : 'pin'}" data-key="${esc(g.key)}" data-code="${esc(o.code)}">${o.pinned ? 'Unpin' : 'Pick'}</button></div>
+        <button class="btn sm" data-act="${o.pinned ? 'unselect' : 'select'}" data-key="${esc(g.key)}" data-code="${esc(o.code)}">${o.pinned ? 'Unselect' : 'Select'}</button></div>
         <div class="small">${esc(c.t || 'Not in the course database')}</div>
         <div class="small muted">Offered: ${esc(offeredText(o.code))}</div>
         ${pre ? `<ul class="prelist small">${pre}</ul>` : `<div class="small muted">${c.t ? 'No prerequisites' : 'Prerequisites unknown'}</div>`}
         ${c.req ? `<div class="small muted">Catalog: ${esc(c.req)}</div>` : ''}
         ${o.why ? `<div class="small muted">${esc(o.why)}</div>` : ''}</div>`;
     }).join('');
-    // open slots, or which pin a new pick replaces (pin() drops the oldest)
+    // open slots, or which selection a new one replaces (pin() drops the oldest)
     const mine = S.opts.choices[g.key] || [], left = g.need - g.chosen.filter(c => !c.auto).length;
-    const slots = !g.choice || g.undeclared ? '' : left > 0 ? `<p class="small"><b>${esc(left)} more to pick</b></p>`
-      : `<p class="small"><b>${g.need === 1 ? 'Picked.' : `All ${esc(g.need)} picked.`}</b> Picking another option replaces ${esc(mine[0] || 'your oldest pick')}, your oldest pick.</p>`;
+    const slots = !g.choice || g.undeclared ? '' : left > 0 ? `<p class="small"><b>${esc(left)} more to select</b></p>`
+      : `<p class="small"><b>${g.need === 1 ? 'Selected.' : `All ${esc(g.need)} selected.`}</b> Selecting another option replaces ${esc(mine[0] || 'your oldest selection')}, your oldest selection.</p>`;
     return `<button class="close" data-close aria-label="Close">×</button>
       <h2>${esc(pickLabel(g))}</h2><p>${esc(g.name)}<br><small class="muted">${esc(g.section)}</small></p>${slots}
       ${takenPathOf(g.key) ? partOf(takenPathOf(g.key)) : ''}
-      ${g.selected === false && pcOfGroup(g.key) ? `<p class="small">One path of ${esc(pcOfGroup(g.key).title)}. Pinning an option here takes this path. <a href="#" data-path="${esc(pcOfGroup(g.key).key)}">Compare paths</a></p>` : ''}
-      <p class="small muted">Green dot: prerequisites done, in progress or pinned. Grey: something is still missing.</p>${rows}`;
+      ${g.selected === false && pcOfGroup(g.key) ? `<p class="small">One path of ${esc(pcOfGroup(g.key).title)}. Selecting an option here selects this path. <a href="#" data-path="${esc(pcOfGroup(g.key).key)}">Compare paths</a></p>` : ''}
+      <p class="small muted">Green dot: prerequisites done, in progress or selected. Grey: something is still missing.</p>${rows}`;
   }
 
   function pathDetail(pc, nm) {
@@ -460,14 +531,14 @@
           <div class="small">${esc(k.t || 'Not in the course database')}</div><div class="small muted">Offered: ${esc(offeredText(c))}</div>
           ${pre ? `<ul class="prelist small">${pre}</ul>` : `<div class="small muted">${k.t ? 'No prerequisites' : 'Prerequisites unknown'}</div>`}
           ${k.req ? `<div class="small muted">Catalog: ${esc(k.req)}</div>` : ''}</div>`; }).join('');
-      const list = p.choice ? `<p class="small">${p.placeholder ? 'Pick the course in the Requirements panel once you pick this path.' : `<a href="#" data-group="${esc(p.groupKey)}">See every option</a>`}</p>` : '';
+      const list = p.choice ? `<p class="small">${p.placeholder ? 'Select the course in the Requirements panel once you select this path.' : `<a href="#" data-group="${esc(p.groupKey)}">See every option</a>`}</p>` : '';
       return `<div class="optd${on ? ' on' : ''}"><div class="optd-h"><i class="dot${p.ready ? ' ok' : ''}" title="${esc(pathNeeds(p))}"></i><b>${esc(pathLine(p))}</b><span class="muted small">${esc(p.units)} u</span>
-        ${on ? `<button class="btn sm" data-change="${esc(pc.key)}">change</button>` : `<button class="btn sm" data-take="${esc(p.groupKey)}" data-pc="${esc(pc.key)}">${done ? 'switch' : 'Pick'}</button>`}</div>
+        ${on ? `<button class="btn sm" data-change="${esc(pc.key)}">change</button>` : `<button class="btn sm" data-take="${esc(p.groupKey)}" data-pc="${esc(pc.key)}">${done ? 'Switch to this path' : 'Select this path'}</button>`}</div>
         <div class="small muted">${esc(p.name)} · ${esc(pathNeeds(p))}</div>${list}${cs}</div>`;
     }).join('');
     return `<button class="close" data-close aria-label="Close">×</button>
       <h2>${esc(pickHead(pc))}</h2><p>${esc(pc.title)}<br><small class="muted">${esc(pc.section)}</small></p>
-      <p class="small muted">Each option is taken as a whole: the plan schedules every course in the one you pick and none from the others. Green dot: prerequisites done, in progress or pinned.</p>${rows}`;
+      <p class="small muted">Each option is taken as a whole: the plan schedules every course in the one you select and none from the others. Green dot: prerequisites done, in progress or selected.</p>${rows}`;
   }
 
   function renderDetail() {
@@ -482,17 +553,17 @@
     d.innerHTML = `<button class="close" data-close aria-label="Close">×</button>
       <h2>${pinned ? PIN + ' ' : ''}${esc(n.code)}</h2><p>${esc(n.title)}</p>
       ${n.fromPath && takenPathOf(n.groupKey) ? partOf(takenPathOf(n.groupKey)) : ''}
-      ${n.pickedFor && groupByKey(n.pickedFor) ? `<p class="small">Picked for: ${esc(groupByKey(n.pickedFor).name)} <button class="btn sm" data-group="${esc(n.pickedFor)}">Change pick</button></p>` : ''}
-      ${pinned ? `<p><button class="btn sm" data-act="unpin" data-key="${esc(g.key)}" data-code="${esc(n.code)}">Unpin</button></p>` : ''}
+      ${n.pickedFor && groupByKey(n.pickedFor) ? `<p class="small">Selected for: ${esc(groupByKey(n.pickedFor).name)} <button class="btn sm" data-group="${esc(n.pickedFor)}">Change selection</button></p>` : ''}
+      ${pinned ? `<p><button class="btn sm" data-act="unselect" data-key="${esc(g.key)}" data-code="${esc(n.code)}">Unselect</button></p>` : ''}
       <dl><dt>Status</dt><dd><i class="badge s-${esc(n.status)}">${esc(STATUS[n.status] || n.status)}</i></dd>
       <dt>Units</dt><dd>${esc(n.units)}</dd>
-      ${n.term ? `<dt>Taken</dt><dd>${esc(n.term)}</dd>` : ''}${n.planned ? `<dt>Planned</dt><dd>${esc(n.planned)}</dd>` : ''}
+      ${n.term ? `<dt>Taken</dt><dd>${esc(n.term)}</dd>` : ''}${n.planned ? `<dt>Planned</dt><dd>${esc(n.planned)}${n.critical ? ` <span class="crit-t">* ${esc(critText(n))}</span>` : n.slack ? ` <small class="muted">(can slip ${esc(n.slack)}${n.slack >= 4 ? '+' : ''} offered quarter${n.slack === 1 ? '' : 's'})</small>` : ''}</dd>` : ''}
       <dt>Offered</dt><dd>${esc(off)}</dd>
       ${g ? `<dt>Satisfies</dt><dd>${esc(g.name)}<br><small class="muted">${esc(g.section)}</small></dd>` : ''}</dl>
       ${g && !g.placeholder && (g.choice || (g.altGroupKeys || []).length) ? `<p><a href="#" data-group="${esc(g.key)}">All options for this requirement</a></p>` : ''}
       <h3>Prerequisites</h3>${pre ? `<ul class="prelist">${pre}</ul>` : '<p class="muted">None</p>'}
-      ${n.pathPrereq ? '<p class="muted small">Only an option you have not picked yet needs this, so it is not in the plan.</p>' : ''}
-      ${n.status === 'placeholder' ? '<p class="muted small">Pick a specific course for this slot in the requirements panel.</p>' : ''}
+      ${n.pathPrereq ? '<p class="muted small">Only an option you have not selected yet needs this, so it is not in the plan.</p>' : ''}
+      ${n.status === 'placeholder' ? '<p class="muted small">Select a specific course for this slot in the requirements panel.</p>' : ''}
       ${n.req ? `<h3>Catalog requisites</h3><p>${esc(n.req)}</p>` : ''}`;
     d.hidden = false;
   }
@@ -541,8 +612,23 @@
 
   // ---------- events ----------
   document.addEventListener('click', e => {
-    const t = e.target.closest('[data-act],[data-node],[data-group],[data-path],[data-take],[data-change],[data-tab],[data-zoom],[data-sample],[data-close],[data-diag]');
+    const t = e.target.closest('[data-act],[data-node],[data-group],[data-path],[data-take],[data-change],[data-tab],[data-zoom],[data-sample],[data-close],[data-diag],[data-defer],[data-conflict],[data-cfcancel],[data-undefer],[data-unconflict],[data-toastundo],[data-modal]');
     if (!t) return;
+    if (t.dataset.modal) return closeModal(t.dataset.modal === 'undo');
+    if (t.dataset.toastundo !== undefined) { const p = S.toastPrev; $('#toast').hidden = true; S.toastPrev = null; return p && undo(p); }
+    if (t.dataset.cfcancel !== undefined) { S.conflictFrom = null; return renderPlan(); }
+    if (t.dataset.cpick && S.conflictFrom) { const { code, term } = S.conflictFrom; return tryChange({ type: 'conflict', a: code, b: t.dataset.cpick, term }); }
+    if (t.dataset.defer) return tryChange({ type: 'defer', code: t.dataset.defer });
+    if (t.dataset.conflict) {
+      const same = S.conflictFrom && S.conflictFrom.code === t.dataset.conflict;
+      S.conflictFrom = same ? null : { code: t.dataset.conflict, term: t.dataset.term };
+      renderPlan();
+      const first = document.querySelector('.pwrap.target .pchip');
+      if (first) first.focus();
+      return;
+    }
+    if (t.dataset.undefer) return tryChange({ type: 'undefer', code: t.dataset.undefer });
+    if (t.dataset.unconflict) { const c = S.opts.conflicts[+t.dataset.unconflict]; return c && tryChange({ type: 'unconflict', a: c.a, b: c.b, term: c.term }); }
     if (t.dataset.diag !== undefined) return copyDiag(t);
     if (t.dataset.sample !== undefined) {
       if (!Array.isArray(window.SAMPLE_LINES)) return showError('Sample audit (sample/dars-lines.js) did not load.');
@@ -556,11 +642,20 @@
     if (t.dataset.path) { e.preventDefault(); return openDetail('p:' + t.dataset.path); }
     if (t.dataset.node) { e.preventDefault(); return openDetail(t.dataset.node); }
     const { act, key, code } = t.dataset;
-    if (act === 'pin') pin(key, code);
-    else if (act === 'unpin') unpin(key, code);
+    if (act === 'select') pin(key, code);
+    else if (act === 'unselect') unpin(key, code);
     else if (t.dataset.group) { e.preventDefault(); openDetail('g:' + t.dataset.group); }
   });
   document.addEventListener('keydown', e => {
+    if (S.modal) { // focus stays in the dialog; Esc = Undo
+      if (e.key === 'Escape') { e.preventDefault(); return closeModal(true); }
+      if (e.key === 'Tab') {
+        const f = [...document.querySelectorAll('#modal button')], i = f.indexOf(document.activeElement);
+        e.preventDefault(); f[(i + (e.shiftKey ? -1 : 1) + f.length) % f.length].focus();
+      }
+      return;
+    }
+    if (e.key === 'Escape' && S.conflictFrom) { S.conflictFrom = null; return renderPlan(); }
     if (e.key === 'Escape' && S.detail) { S.detail = null; renderDetail(); }
     if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('.node,.cnode,.cchip,.pnode,.pbtn,.qlink')) { e.preventDefault(); e.target.dispatchEvent(new MouseEvent('click', { bubbles: true })); }
   });

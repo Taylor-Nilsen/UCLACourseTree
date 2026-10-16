@@ -76,7 +76,7 @@ button, input { font: inherit; color: inherit; }
 .opt b { white-space: nowrap; flex: none; }
 .opt small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .opt.chosen, .opt.on { background: var(--ip-bg); }
-.pin { width: 12px; height: 12px; flex: none; color: var(--accent); align-self: center; }
+.selicon { width: 12px; height: 12px; flex: none; color: var(--accent); align-self: center; }
 .alts summary { cursor: pointer; font-size: 12px; color: var(--accent); margin-top: 4px; }
 .filter { width: 100%; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); margin: 4px 0; }
 .optlist { max-height: 150px; overflow-y: auto; }
@@ -180,6 +180,37 @@ button, input { font: inherit; color: inherit; }
 .pchip:hover { border-color: var(--accent); }
 .pchip.choose { border: 1.5px dashed var(--ready); border-left-width: 4px; background: var(--ph-bg); color: var(--ph); }
 .pchip.choose b { display: block; font-size: 13px; overflow-wrap: anywhere; }
+.pwrap { position: relative; }
+.pwrap .pchip { padding-right: 56px; }
+.pacts { position: absolute; top: 4px; right: 4px; display: flex; gap: 2px; opacity: 0; transition: opacity .1s; }
+.pwrap:hover .pacts, .pwrap:focus-within .pacts, .pwrap.source .pacts { opacity: 1; }
+@media (hover: none) { .pacts { opacity: 1; } }
+.pact { width: 24px; height: 22px; padding: 0; border: 1px solid var(--line); border-radius: 5px; background: var(--card); cursor: pointer; font-size: 13px; line-height: 1; }
+.pact:hover, .pact:focus-visible { border-color: var(--accent); outline: none; }
+.pwrap.source .pchip { outline: 2px solid var(--accent); }
+.pwrap.target .pchip { border: 1.5px dashed var(--block); border-left-width: 4px; }
+.crit { position: absolute; top: -9px; left: -7px; z-index: 1; color: var(--block); font-weight: 800; font-size: 26px; line-height: 1; cursor: help; }
+.crit-t { color: var(--block); font-weight: 700; }
+.node .crit { fill: var(--block); font-size: 28px; font-weight: 800; }
+.plan { padding-top: 6px; }
+.cfstatus { margin: 0 0 8px; padding: 6px 10px; border-radius: 8px; background: var(--ip-bg); font-size: 13px; }
+.constraints { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; margin-bottom: 10px; }
+.constraints h3 { font-size: 13px; margin: 2px 0 4px; }
+.constraints ul { list-style: none; margin: 0; padding: 0; }
+.constraints li { display: flex; align-items: flex-start; gap: 8px; padding: 4px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.constraints li:first-child { border-top: 0; }
+.constraints li > span { flex: 1; min-width: 0; }
+.cx { flex: none; width: 24px; height: 24px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); cursor: pointer; font-size: 16px; line-height: 1; }
+.cx:hover, .cx:focus-visible { border-color: var(--block); color: var(--block); }
+.toast { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 30; display: flex; align-items: center; gap: 12px; max-width: min(560px, calc(100vw - 32px));
+  padding: 10px 14px; border-radius: 10px; background: var(--fg); color: var(--bg); box-shadow: 0 6px 24px rgba(0,0,0,.25); font-size: 13px; }
+.toast .btn { background: var(--bg); color: var(--fg); flex: none; }
+.modal-back { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0,0,0,.45); }
+.modal { width: min(520px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; background: var(--card); color: var(--fg); border-radius: 12px; padding: 18px 20px; box-shadow: 0 12px 40px rgba(0,0,0,.35); }
+.modal h2 { margin: 0 0 10px; font-size: 17px; }
+.modal p { margin: 8px 0 4px; }
+.modal ul { margin: 0; padding-left: 20px; font-size: 13px; }
+.modal-btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
 
 .detail { position: fixed; top: 0; right: 0; bottom: 0; width: min(360px, 100vw); overflow-y: auto; background: var(--card); border-left: 1px solid var(--line); box-shadow: -6px 0 24px rgba(0,0,0,.15); padding: 16px; z-index: 10; }
 .detail h2 { margin: 0 32px 4px 0; font-size: 18px; }
@@ -239,14 +270,27 @@ button, input { font: inherit; color: inherit; }
         <div id="tree" class="scroll"></div>
         <div class="legend">
           <span><i class="s-done"></i>done</span><span><i class="s-ip"></i>in progress</span><span><i class="s-ready"></i>ready now</span>
-          <span><i class="s-locked"></i>locked</span><span><i class="s-placeholder"></i>GE / elective slot</span><span><i class="s-choice"></i>your pick (green dot: prereqs met)</span><span><i class="s-path"></i>pick one of several options</span><span><i class="blk"></i>blocking prerequisite</span>
+          <span><i class="s-locked"></i>locked</span><span><i class="s-placeholder"></i>GE / elective slot</span><span><i class="s-choice"></i>your selection (green dot: prereqs met)</span><span><i class="s-path"></i>select one of several options</span><span><i class="blk"></i>blocking prerequisite</span><span><b class="crit-t">*</b> must be taken in its planned quarter</span>
         </div>
       </section>
-      <section id="plan-view" hidden><div id="plan" class="plan"></div></section>
+      <section id="plan-view" hidden>
+        <p class="small muted">Hover a class for » (defer it a quarter) and ≠ (mark a time conflict with another class that quarter). <span class="crit-t">*</span> must be taken that quarter.</p>
+        <div id="constraints" class="constraints" hidden></div>
+        <p id="cfstatus" class="cfstatus" role="status" aria-live="polite" hidden></p>
+        <div id="plan" class="plan"></div>
+      </section>
     </main>
   </div>
 </div>
 <aside id="detail" class="detail" hidden></aside>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<div id="modal" class="modal-back" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-t" aria-describedby="modal-b">
+    <h2 id="modal-t">This change causes scheduling problems</h2>
+    <div id="modal-b"></div>
+    <div class="modal-btns"><button type="button" class="btn primary" data-modal="undo">Undo</button><button type="button" class="btn" data-modal="continue">Continue anyway</button></div>
+  </div>
+</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="data/ucla-courses.js"></script>

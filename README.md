@@ -7,7 +7,7 @@ Upload your UCLA DARS degree-audit PDF and get a prerequisite "skill tree" plus 
 - Reads your audit: completed courses, courses in progress, what each requirement group still needs, and your expected graduation term.
 - Draws the remaining courses as a tree, with arrows from prerequisites to the courses they unlock.
 - Spreads the remaining courses over the quarters you have left, respecting prerequisites and the quarters each course was actually offered.
-- Never picks between real options for you. Where a requirement offers more courses than it needs, it shows every option with its prerequisites and you pin your pick.
+- Never chooses between real options for you. Where a requirement offers more courses than it needs, it shows every option with its prerequisites and you select the ones you want.
 
 ## Run it
 
@@ -32,21 +32,32 @@ Tests: `npm test` (needs Node, no dependencies).
 - In progress: you are enrolled this quarter.
 - Ready: every prerequisite is done or in progress, so you can take it next.
 - Locked: at least one prerequisite is still missing.
-- Placeholder: a general education or elective slot with no specific course picked yet.
+- Placeholder: a general education or elective slot with no specific course selected yet.
 
 ## How choices work
 
 - A requirement that needs N courses and lists N or fewer usable options uses all of them automatically. Options that were not offered in recent terms, excluded by the audit, or already used by another requirement do not count as usable.
-- A requirement that lists more options than it needs becomes a "Pick N of M" box in the tree. Each option shows a green dot when its prerequisites are done or in progress and a grey dot otherwise. Click the box to see every option's prerequisites and the terms it was offered, then pin the ones you want.
-- Until you pick, the quarter plan holds a "choose" slot for each open course so the timeline stays honest.
-- Alternative requirement groups are all shown as one choice. For example, a capstone that is either A + B or C appears as one card with both paths, and pinning a course in one path selects it.
+- A requirement that lists more options than it needs becomes a "Select N of M" box in the tree. Each option shows a green dot when its prerequisites are done or in progress and a grey dot otherwise. Click the box to see every option's prerequisites and the terms it was offered, then select the ones you want.
+- Until you select, the quarter plan holds a "choose" slot for each open course so the timeline stays honest.
+- Alternative requirement groups are all shown as one choice. For example, a capstone that is either A + B or C appears as one card with both paths, and selecting a course in one path selects it.
 - Ethics and writing are the exception to "one course, one requirement": a lab course that also satisfies Writing II counts for both.
 - General education and other long lists (over 60 options) stay as searchable slots in their own lane at the bottom of the tree.
-- Pins are saved in your browser.
+- Selections are saved in your browser.
+
+## Adjusting the quarter plan
+
+Hover (or tap) a class in the Quarter plan for two small buttons:
+
+- » Defer: push it to the next quarter it is offered. Anything that needs it moves with it.
+- ≠ Conflict: then click another class in the same quarter that meets at the same time. The planner keeps the one whose move would disrupt the plan least (later graduation first, then courses pushed past your expected graduation, then how many other courses move) and fills the freed seat with the next best course. The "Your scheduling constraints" list above the plan says what it kept and why; × removes a constraint.
+
+A red asterisk in a class's upper-left corner means you need to take it that quarter: delaying it by one offered quarter would push you past your expected graduation, or leave a course with no quarter it can be taken in. Finishing a quarter later but still on time does not count. The detail panel says what it would push back, or how many quarters a class can slip.
+
+Small changes apply at once with an Undo button. If a change pushes back graduation, pushes a course past your expected graduation, leaves a course unschedulable, or moves 3 or more other courses, a dialog lists what moves and lets you undo or continue. Constraints are saved in your browser and cleared when you load a new audit.
 
 ## Export
 
-Export opens a print-ready plan and prerequisite tree; save it as PDF from the print dialog.
+Export opens a print-ready plan and prerequisite tree (with your constraints applied; a * marks classes that must be taken that quarter); save it as PDF from the print dialog.
 
 ## Deploy
 
@@ -74,7 +85,7 @@ Pages is free on a public repo. A private repo needs GitHub Pro (included with G
 - `u` is the unit count. For a range such as "2 to 4", it is the maximum.
 - `pre` is parsed from the catalog's "Requisite(s)" and "Enforced requisite(s)" sentences. Recommended preparation, corequisites, courses that "may be taken concurrently" and grade minimums are left out. An alternative that is not a course (a placement test or a GPA) drops that group. When the text can't be parsed, `pre` is `[]` and the raw sentence is kept in `req`.
 - `off` is the set of quarters (`F`, `W`, `S`) in which the course had at least one section that was not cancelled, Fall 2024 through Winter 2027. `offTerms` lists those terms (`["25F","26W"]`). Summer is left out.
-- `off` is `""` when the course had no sections in any of those terms. `offNote` then says when it last ran (`"not offered since Spring 2023"`, or `"not offered since before Fall 2021"`). The planner never schedules such a course and never picks it over an offered alternative.
+- `off` is `""` when the course had no sections in any of those terms. `offNote` then says when it last ran (`"not offered since Spring 2023"`, or `"not offered since before Fall 2021"`). The planner never schedules such a course and never chooses it over an offered alternative.
 - Tutorials (supervised research, individual study, whose catalog entry starts with "Tutorial") that the Schedule of Classes never lists keep `off: "?"` with an `offNote` saying so. The planner treats `"?"` as any quarter.
 - `w2` marks a course whose catalog text says it satisfies Writing II.
 - `last` marks a course that was dropped from the current catalog. Its value is the last catalog year that listed it (2021-2025). These courses are kept because DARS still shows them.
@@ -90,4 +101,4 @@ Pages is free on a public repo. A private repo needs GitHub Pro (included with G
 
 ## Privacy
 
-Everything runs in your browser. The PDF is read locally with pdf.js and nothing is sent to a server. Pins are kept in your browser's local storage. The sample audits in `sample/` are real audits with the name, student ID and letter grades removed.
+Everything runs in your browser. The PDF is read locally with pdf.js and nothing is sent to a server. Selections and scheduling constraints are kept in your browser's local storage. The sample audits in `sample/` are real audits with the name, student ID and letter grades removed.

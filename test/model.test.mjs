@@ -258,10 +258,10 @@ t('sample 1: the two ENGINEERING ETHICS groups are one path choice: a list of it
   const list = pc.paths.find(p => p.choice), e2 = pc.paths.find(p => !p.choice);
   assert.ok(list && e2); assert.deepEqual(e2.courses, ['ENGR 2']); assert.deepEqual(list.courses, []);
   const nList = m.groups.find(g => g.key === list.groupKey).options.filter(c => offered(c) && !parsed.taken[c]).length;
-  assert.ok(nList > 5); assert.equal(list.summary, `pick 1 of ${nList} from ETHICS list`);
+  assert.ok(nList > 5); assert.equal(list.summary, `select 1 of ${nList} from ETHICS list`);
   assert.ok(!m.nodes.some(n => n.code === 'ENGR 2'));
   assert.ok(m.nodes.some(n => n.code === 'PATH: ' + pc.key && n.status === 'path'));
-  assert.ok(planned(m).some(c => c.startsWith('CHOOSE: ENGINEERING ETHICS:') && c.includes(`pick 1 of ${nList}`) && c.includes('ENGR 2')));
+  assert.ok(planned(m).some(c => c.startsWith('CHOOSE: ENGINEERING ETHICS:') && c.includes(`select 1 of ${nList}`) && c.includes('ENGR 2')));
   // picking the list path selects that group and leaves its own pick-1 slot
   const mm = MODEL.build(parsed, { choices: { ['path:' + pc.key]: [list.groupKey] } });
   assert.ok(mm.groups.find(g => g.key === list.groupKey).selected);
@@ -307,7 +307,7 @@ t('ethics/writing: an EW course pinned for ethics satisfies writing automaticall
   const ew = eth.alternatives.map(a => a.code).find(c => /EW$/.test(c) && wr.options.includes(c));
   assert.ok(ew);
   const mm = MODEL.build(parsed, { choices: { [eth.key]: [ew] } }), w = mm.groups.find(g => g.key === wr.key);
-  assert.deepEqual(w.chosen, [{ code: ew, auto: true, why: 'picked for engineering ethics; it is on this list, so it counts here too' }]);
+  assert.deepEqual(w.chosen, [{ code: ew, auto: true, why: 'selected for engineering ethics; it is on this list, so it counts here too' }]);
   assert.ok(!w.options.includes(ew) && !w.alternatives.some(a => a.code === ew));
   assert.ok(!mm.nodes.some(n => n.code.startsWith('CHOOSE: ENGINEERING WRITING') || n.code.startsWith('GE: ENGINEERING WRITING')));
   const nd = mm.nodes.find(n => n.code === ew);
@@ -315,7 +315,93 @@ t('ethics/writing: an EW course pinned for ethics satisfies writing automaticall
   assert.equal(planned(mm).filter(c => c === ew).length, 1);
   // the other way round: picked for writing, on the ethics list -> ethics (a path choice) is taken and satisfied by it
   const m3 = MODEL.build(parsed, { choices: { [wr.key]: [ew] } }), e3 = m3.groups.find(g => g.key === eth.key);
-  assert.ok(e3.selected && !e3.undecided); assert.match(e3.chosen[0].why, /^picked for engineering writing/);
+  assert.ok(e3.selected && !e3.undecided); assert.match(e3.chosen[0].why, /^selected for engineering writing/);
   assert.ok(!m3.nodes.some(n => n.code.startsWith('CHOOSE: ENGINEERING ETHICS') || (n.status === 'path' && n.title === 'ENGINEERING ETHICS')));
+});
+
+// ---- scheduling constraints: defers, conflicts, critical courses, previewChange
+Object.assign(COURSES, { 'ZZ 50': { t: 'ZZ 50', u: 4, pre: [], off: 'FWS' }, 'ZZ 51': { t: 'ZZ 51', u: 4, pre: [['ZZ 50']], off: 'FWS' },
+  'ZZ 52': { t: 'ZZ 52', u: 4, pre: [['ZZ 51']], off: 'FWS' } });
+const chain = synth([['R', 4, [zz('ZZ 50'), zz('ZZ 51'), zz('ZZ 52'), zz('ZZ 10')]]]); // ZZ 50 -> 51 -> 52, and a leaf ZZ 10
+const termIn = (mm, c) => (mm.plan.find(q => q.courses.includes(c)) || {}).term;
+t('defer: the course moves to its next offered quarter, never before its prereqs', () => {
+  const p = synth([['R', 2, [zz('ZZ 21'), zz('ZZ 22')]]]); // ZZ 21 Fall only -> ZZ 22 Winter only
+  const r = MODEL.previewChange(p, {}, { type: 'defer', code: 'ZZ 21' });
+  assert.deepEqual(r.opts.defers, { 'ZZ 21': 'FA28' });
+  assert.equal(termIn(r.after, 'ZZ 21'), 'FA28'); assert.equal(termIn(r.after, 'ZZ 22'), 'WI29'); // dependent follows
+  assert.equal(termIn(MODEL.build(p, { defers: { 'ZZ 22': 'SP28' } }), 'ZZ 22'), 'WI29'); // not before SP28, Winter only
+  assert.equal(termIn(MODEL.build(p, { defers: { 'ZZ 22': 'WI27' } }), 'ZZ 22'), 'WI28'); // still after ZZ 21 (FA27)
+  const d = MODEL.previewChange(chain, {}, { type: 'defer', code: 'ZZ 10' });
+  assert.equal(termIn(d.before, 'ZZ 10'), 'WI27'); assert.equal(termIn(d.after, 'ZZ 10'), 'SP27');
+  const u = MODEL.previewChange(chain, d.opts, { type: 'undefer', code: 'ZZ 10' });
+  assert.deepEqual(u.opts.defers, {}); assert.equal(termIn(u.after, 'ZZ 10'), 'WI27');
+});
+t('conflict: the bottleneck stays and the leaf moves; why says so', () => {
+  for (const [a, b] of [['ZZ 50', 'ZZ 10'], ['ZZ 10', 'ZZ 50']]) {
+    const mm = MODEL.build(chain, { conflicts: [{ a, b, term: 'WI27' }] }), r = mm.conflictResolutions[0];
+    assert.equal(r.kept, 'ZZ 50'); assert.equal(r.moved, 'ZZ 10'); assert.equal(r.movedTo, 'SP27');
+    assert.equal(termIn(mm, 'ZZ 50'), 'WI27'); assert.equal(termIn(mm, 'ZZ 10'), 'SP27'); assert.equal(termIn(mm, 'ZZ 52'), 'FA27');
+    assert.equal(r.why, 'Kept ZZ 50: it unlocks 2 later courses; moving ZZ 10 instead changes nothing else.');
+  }
+});
+const three = synth([['R', 3, [zz('ZZ 10'), zz('ZZ 11'), zz('ZZ 12')]]]);
+t('conflict: on a tie the first-named course stays; the freed slot is filled by the next eligible course', () => {
+  const base = MODEL.build(three, { perQuarter: 2 });
+  assert.deepEqual(base.plan.map(q => q.courses), [['ZZ 10', 'ZZ 11'], ['ZZ 12']]);
+  for (const [a, b] of [['ZZ 10', 'ZZ 11'], ['ZZ 11', 'ZZ 10']]) {
+    const mm = MODEL.build(three, { perQuarter: 2, conflicts: [{ a, b, term: 'WI27' }] }), r = mm.conflictResolutions[0];
+    assert.deepEqual([r.kept, r.moved, r.movedTo, r.filledBy], [a, b, 'SP27', 'ZZ 12']);
+    assert.deepEqual(mm.plan.map(q => q.courses.slice().sort()), [[a, 'ZZ 12'].sort(), [b]]);
+    assert.match(r.why, /so the first-named one stays/);
+  }
+  // no clash once the pair is no longer in that quarter
+  const nc = MODEL.build(three, { perQuarter: 2, conflicts: [{ a: 'ZZ 10', b: 'ZZ 12', term: 'WI27' }] });
+  assert.equal(nc.conflictResolutions[0].kept, null); assert.match(nc.conflictResolutions[0].why, /^No clash now/);
+});
+t('critical / slack: with graduation right at the plan end, a free leaf is not critical; every course on the longest chain is', () => {
+  const tight = Object.assign({}, chain, { student: Object.assign({}, chain.student, { expected: 'FA27' }) });
+  const mm = MODEL.build(tight, {}), nd = c => mm.nodes.find(x => x.code === c);
+  assert.equal(mm.plan[mm.plan.length - 1].term, 'FA27');
+  assert.equal(nd('ZZ 10').critical, false); assert.equal(nd('ZZ 10').slack, 2); // SP27, FA27 fine; WI28 would end later
+  for (const c of ['ZZ 50', 'ZZ 51', 'ZZ 52']) { assert.equal(nd(c).critical, true, c); assert.equal(nd(c).slack, 0); assert.equal(nd(c).criticalWhy, 'your last quarter to WI28, past expected graduation'); }
+  // room before graduation: finishing a quarter later is not a cascade, so nothing on the chain is starred
+  const roomy = MODEL.build(Object.assign({}, chain, { student: Object.assign({}, chain.student, { expected: 'SP29' }) }), {});
+  assert.ok(roomy.nodes.filter(x => x.planned).every(x => !x.critical));
+  // past expected graduation already: a slip that pushes another course late is still critical, and nothing throws
+  const late = Object.assign({}, chain, { student: { expected: 'FA26' } }), ml = MODEL.build(late, {});
+  assert.ok(ml.nodes.find(x => x.code === 'ZZ 50').critical);
+  const never = synth([['R', 2, [zz('ZZ 31'), zz('ZZ 10')]]]), mn = MODEL.build(never, { defers: { 'ZZ 31': 'WI27' } });
+  assert.ok(mn.warnings.some(w => /Ignored your deferral of ZZ 31/.test(w)));
+});
+t('previewChange severity: none, minor, major', () => {
+  assert.equal(MODEL.previewChange(chain, {}, { type: 'defer', code: 'ZZ 10' }).diff.severity, 'none');
+  const minor = MODEL.previewChange(three, { perQuarter: 2 }, { type: 'defer', code: 'ZZ 10' }).diff;
+  assert.equal(minor.severity, 'minor'); assert.deepEqual(minor.moved, [{ code: 'ZZ 10', from: 'WI27', to: 'SP27' }, { code: 'ZZ 12', from: 'SP27', to: 'WI27' }]);
+  const major = MODEL.previewChange(chain, {}, { type: 'defer', code: 'ZZ 50' }).diff;
+  assert.equal(major.severity, 'major'); assert.deepEqual([major.finalTermBefore, major.finalTermAfter], ['FA27', 'WI28']);
+  assert.deepEqual(major.moved.map(x => x.code), ['ZZ 50', 'ZZ 51', 'ZZ 52']);
+  const lateDiff = MODEL.previewChange(Object.assign({}, chain, { student: { expected: 'FA27' } }), {}, { type: 'defer', code: 'ZZ 52' }).diff;
+  assert.equal(lateDiff.severity, 'major'); assert.deepEqual(lateDiff.pastExpected, ['ZZ 52']);
+  const c = MODEL.previewChange(chain, {}, { type: 'conflict', a: 'ZZ 50', b: 'ZZ 10', term: 'WI27' });
+  assert.equal(c.diff.severity, 'none'); assert.deepEqual(c.opts.conflicts, [{ a: 'ZZ 50', b: 'ZZ 10', term: 'WI27' }]);
+  assert.deepEqual(MODEL.previewChange(chain, c.opts, { type: 'unconflict', a: 'ZZ 10', b: 'ZZ 50', term: 'WI27' }).opts.conflicts, []);
+  assert.equal(MODEL.previewChange(chain, {}, { type: 'defer', code: 'NOPE 1' }).diff.severity, 'none'); // not planned: no-op
+});
+t('defers / conflicts naming courses outside the plan are ignored with a warning', () => {
+  const base = MODEL.build(chain, {});
+  const mm = MODEL.build(chain, { defers: { 'NOPE 1': 'WI28', 'ZZ 10': 'later' }, conflicts: [{ a: 'NOPE 1', b: 'ZZ 10', term: 'WI27' }, null, { a: 'ZZ 10', b: 'ZZ 10', term: 'WI27' }, { a: 'ZZ 10', b: 'ZZ 50' }] });
+  assert.deepEqual(mm.plan, base.plan); assert.deepEqual(mm.conflictResolutions, []);
+  assert.equal(mm.warnings.filter(w => /^Ignored your/.test(w)).length, 6, mm.warnings.join('\n'));
+});
+t('samples: a full build with criticality stays fast; critical courses carry a reason', () => {
+  for (const f of ['dars-lines.json', 'dars-lines-2.json']) {
+    const p = DARS.parse(JSON.parse(readFileSync(new URL('../sample/' + f, import.meta.url), 'utf8')));
+    MODEL.build(p, { perQuarter: 4 }); // warm up
+    const t0 = performance.now(), mm = MODEL.build(p, { perQuarter: 4 }), ms = performance.now() - t0;
+    const pl = mm.nodes.filter(x => x.planned && !/^(GE|CHOOSE): /.test(x.code));
+    console.log(`    ${f}: build ${ms.toFixed(1)} ms, ${pl.filter(x => x.critical).length} of ${pl.length} planned courses critical`);
+    assert.ok(ms < 300, ms);
+    for (const x of pl) { assert.ok(x.slack >= 0 && x.slack <= 4); if (x.critical) assert.ok(x.criticalWhy, x.code); }
+  }
 });
 console.log(n + ' passed');

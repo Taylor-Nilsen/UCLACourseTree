@@ -15,7 +15,7 @@
   });
   const longDate = s => { const m = /^(\d\d?)\/(\d\d?)\/(\d{4})$/.exec(s || ''); const d = m ? new Date(+m[3], m[1] - 1, +m[2]) : s instanceof Date ? s : null; return d ? d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : esc(s || '—'); };
   const isSlot = c => /^(GE|CHOOSE): /.test(c);
-  // "pick 1 of 11 from ETHICS list" -> "pick 1 of 11 from Ethics list"
+  // "select 1 of 11 from ETHICS list" -> "select 1 of 11 from Ethics list"
   const summary = p => String(p.summary || '').replace(/from (.+) list$/, (m, x) => 'from ' + titleCase(x) + ' list');
 
   // GE / CHOOSE plan slots -> { kind, name, detail }
@@ -117,7 +117,7 @@
         return `<g class="slot"><rect x="${X}" y="${Y}" width="${BW}" height="${BH}"/><text x="${X + 6}" y="${Y + 14}" class="code">${esc(s.kind === 'GE' ? 'GE' : 'Choose' + ((/ #\d+/.exec(it.code) || [''])[0]))}</text><text x="${X + 6}" y="${Y + 27}" class="t">${esc(trunc(s.name.replace(/ #\d+$/, ''), 30))}</text></g>`;
       }
       const comp = ['done', 'ip'].includes(n.status), sub = it.c === 0 && !comp ? 'planned ' + termLabel(n.planned) : n.status === 'ip' ? 'in progress' : n.title;
-      return `<g class="box${comp ? ' done' : ''}" data-code="${esc(it.code)}" data-col="${it.c}"><rect x="${X}" y="${Y}" width="${BW}" height="${BH}"/><text x="${X + 6}" y="${Y + 14}" class="code">${esc(it.code)}</text><text x="${X + 6}" y="${Y + 27}" class="t">${esc(trunc(sub, 29))}</text></g>`;
+      return `<g class="box${comp ? ' done' : ''}" data-code="${esc(it.code)}" data-col="${it.c}"><rect x="${X}" y="${Y}" width="${BW}" height="${BH}"/>${n.critical && it.c ? `<text x="${X + 1.5}" y="${Y + 8}" class="crit">*</text>` : ''}<text x="${X + 6}" y="${Y + 14}" class="code">${esc(it.code)}</text><text x="${X + 6}" y="${Y + 27}" class="t">${esc(trunc(sub, 29))}</text></g>`;
     };
     const heads = cols.map((list, c) => c === 0 ? (list.length ? (page ? 'Completed / earlier' : 'Completed') : '') : termLabel(terms[a + c - 2]))
       .map((h, c) => h ? `<text x="${x[c] + BW / 2}" y="14" class="head">${esc(h)}</text>` : '').join('');
@@ -174,6 +174,8 @@ svg .slot text { font-style: italic; }
 svg .slot .code { font-weight: normal; }
 svg .edges path { fill: none; stroke: #000; stroke-width: 0.8; }
 svg .rule { stroke: #000; stroke-width: 0.5; }
+svg .crit { font-size: 9px; font-weight: bold; }
+td .crit { float: left; font-weight: bold; margin-right: 2pt; }
 footer { margin-top: 18pt; font-size: 7.5pt; }
 .bar { margin: 0 0 12pt; }
 .bar button { font: inherit; padding: 4pt 10pt; border: 0.75pt solid #000; background: #fff; color: #000; cursor: pointer; }
@@ -194,14 +196,15 @@ footer { margin-top: 18pt; font-size: 7.5pt; }
     const cell = c => {
       if (!c) return '<td></td>';
       if (isSlot(c)) { const s = slotInfo(c, model); return s.kind === 'GE' ? `<td><span class="ge">GE: ${esc(s.name)}</span></td>` : `<td><i>Choose: ${esc(s.name)}</i><small>${esc(s.detail)}</small></td>`; }
-      return `<td><b>${esc(c)}</b><small>${esc((N.get(c) || {}).title || '')}</small></td>`;
+      const n = N.get(c) || {};
+      return `<td>${n.critical ? '<span class="crit" title="Must be taken this quarter">*</span>' : ''}<b>${esc(c)}</b><small>${esc(n.title || '')}</small></td>`;
     };
     const rows = model.plan.map(q => `<tr><td class="term">${esc(termLabel(q.term))}${q.beyondExpected ? '<small>after expected graduation</small>' : ''}</td>${Array.from({ length: ncol }, (_, i) => cell(q.courses[i])).join('')}<td class="u">${esc(q.units)}</td></tr>`).join('\n');
     const head = `<tr><th class="term">Quarter</th>${Array.from({ length: ncol }, (_, i) => `<th>Course ${i + 1}</th>`).join('')}<th class="u">Units</th></tr>`;
 
     const pending = [];
     for (const pc of model.pathChoices || []) if (pc.chosenPaths.length < pc.pick)
-      pending.push(`${titleCase(pc.title)}${pc.pick > 1 ? ` (pick ${pc.pick})` : ''}: ${pc.paths.filter(p => !pc.chosenPaths.includes(p.groupKey)).map(summary).join(', or ')}`);
+      pending.push(`${titleCase(pc.title)}${pc.pick > 1 ? ` (select ${pc.pick})` : ''}: ${pc.paths.filter(p => !pc.chosenPaths.includes(p.groupKey)).map(summary).join(', or ')}`);
     for (const gr of model.groups) if (gr.selected && gr.undecided && !gr.placeholder) {
       const open = model.nodes.filter(n => n.groupKey === gr.key && !n.pathChoiceKey && n.code.startsWith('CHOOSE: ')).length || gr.need;
       const alts = gr.alternatives.map(a => a.code);
@@ -214,7 +217,8 @@ footer { margin-top: 18pt; font-size: 7.5pt; }
 <span><svg width="26" height="12"><rect x="0.5" y="0.5" width="25" height="11" fill="#fff" stroke="#000" stroke-width="1"/></svg>Planned course</span>
 <span><svg width="26" height="12"><rect x="0.5" y="0.5" width="25" height="11" fill="#fff" stroke="#000" stroke-width="0.8" stroke-dasharray="3 2"/></svg>Completed or in progress</span>
 <span><svg width="26" height="12"><rect x="0.5" y="0.5" width="25" height="11" fill="#fff" stroke="#000" stroke-width="0.6"/></svg><i>Open choice or GE slot</i></span>
-<span><svg width="34" height="12"><path d="M1 6H27" stroke="#000" stroke-width="0.8"/><path d="M27 3L33 6L27 9z" fill="#000"/></svg>is required before</span></div>`;
+<span><svg width="34" height="12"><path d="M1 6H27" stroke="#000" stroke-width="0.8"/><path d="M27 3L33 6L27 9z" fill="#000"/></svg>is required before</span>
+<span><b>*</b>&nbsp;must be taken that quarter; delaying it pushes back graduation</span></div>`;
     const trees = svgs.map((s, i) => `<section class="tree-page"><h2>Prerequisite Tree${svgs.length > 1 ? ` <small>(${i ? 'continued, ' : ''}part ${i + 1} of ${svgs.length})</small>` : ''}</h2>
 <p class="lead">Remaining courses, each in the quarter it is planned. Read left to right; arrows run from a prerequisite to the course that needs it.</p>
 ${legend}${s}</section>`).join('\n');
@@ -226,7 +230,7 @@ ${legend}${s}</section>`).join('\n');
 <table class="plan"><thead>${head}</thead><tbody>
 ${rows}
 </tbody></table>
-<p class="totals">Planned: ${esc(stats.plannedUnits ?? 0)} units in ${esc(stats.coursesRemaining ?? 0)} remaining courses.</p>
+<p class="totals">Planned: ${esc(stats.plannedUnits ?? 0)} units in ${esc(stats.coursesRemaining ?? 0)} remaining courses.${model.nodes.some(n => n.critical) ? ' <b>*</b> Must be taken that quarter: delaying it pushes back graduation.' : ''}</p>
 ${model.warnings && model.warnings.length ? `<h3>Notes</h3>${list('ol', model.warnings).replace(/ (\d+)\b/g, '&nbsp;$1')}` : ''}
 ${pending.length ? `<h3>Pending decisions</h3>${list('ul', pending)}` : ''}
 ${trees}
@@ -243,7 +247,7 @@ ${trees}
     const parsed = Array.isArray(lines) && lines.length && window.DARS ? DARS.parse(lines) : null;
     if (!parsed || !parsed.ok) return alert('Load an audit first.');
     let html;
-    try { html = buildDocument(MODEL.build(parsed, { choices: opts.choices || {}, perQuarter: opts.perQuarter || 4, useSummer: !!opts.useSummer }), parsed); }
+    try { html = buildDocument(MODEL.build(parsed, { choices: opts.choices || {}, defers: opts.defers || {}, conflicts: opts.conflicts || [], perQuarter: opts.perQuarter || 4, useSummer: !!opts.useSummer }), parsed); }
     catch (e) { console.error(e); return alert('Could not build the export: ' + e.message); }
     const w = window.open('', '_blank');
     if (!w) return alert('Allow pop-ups for this page to export.');
