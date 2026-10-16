@@ -10,16 +10,17 @@
   };
   if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-  const NW = 200, NH = 56, COLW = 340, ROWH = 110, PAD = 40;
+  const NW = 200, NH = 56, COLW = 340, ROWH = 110, PAD = 40, CW = 240, CHIPW = 108, MAXCHIPS = 8;
   const STATUS = { done: 'Completed', ip: 'In progress', ready: 'Ready now', locked: 'Locked', placeholder: 'GE / elective slot' };
   const QTR = { F: 'Fall', W: 'Winter', S: 'Spring' };
+  const PIN_D = 'M10 1l5 5-2 1-3 3 .5 3.5L9 15l-3-3-4 4-1-1 4-4-3-3 1.5-1.5L7 6l3-3z';
   const PIN = '<svg class="pin" viewBox="0 0 16 16" aria-label="pinned"><path d="M10 1l5 5-2 1-3 3 .5 3.5L9 15l-3-3-4 4-1-1 4-4-3-3 1.5-1.5L7 6l3-3z" fill="currentColor"/></svg>';
 
   const saved = store.get('dars.opts') || {};
   const S = {
     parsed: null, model: null, tab: 'tree', zoom: 1, detail: null,
     opts: { choices: saved.choices || {}, perQuarter: saved.perQuarter || 4, useSummer: !!saved.useSummer },
-    openAlts: new Set(), filters: {},
+    altOpen: {}, filters: {},
   };
 
   // ---------- loading ----------
@@ -68,6 +69,24 @@
     return t ? (t.grade === 'IP' ? 'ip' : 'done') : 'none';
   }
   const titleOf = (code, nodes) => (nodes[code] && nodes[code].title) || ((window.COURSES || {})[code] || {}).t || '';
+  const course = c => (window.COURSES || {})[c];
+  const isPinned = (key, code) => (S.opts.choices[key] || []).includes(code);
+  const isGE = n => { const g = n.groupKey && groupByKey(n.groupKey); return !!(g && g.placeholder); };
+  const offeredText = c => { const o = course(c) ? course(c).off : null; return o == null ? 'unknown' : o ? o.split('').map(q => QTR[q] || q).join(', ') : 'Not currently offered'; };
+  const readyNow = c => (course(c) ? course(c).pre : []).every(og => og.some(x => ['done', 'ip'].includes(statusOf(x, {}))));
+  // options a choice node / panel lists: pins first, then the model's ready-sorted alternatives
+  function choiceOpts(g) {
+    const pins = (g.chosen || []).filter(c => !c.auto).map(c => ({ code: c.code, why: c.why, pinned: true, ready: readyNow(c.code) }));
+    if (g.choice) return pins.concat(g.alternatives || []);
+    return pins.concat((g.chosen || []).filter(c => c.auto && !c.code.startsWith('GE: ')).map(c => ({ code: c.code, why: c.why, ready: readyNow(c.code) })));
+  }
+  const pickLabel = g => `Pick ${g.need} of ${choiceOpts(g).length}`;
+  function preHtml(prereqs, nm) {
+    return (prereqs || []).map(og => '<li>' + og.map(c => {
+      const s = statusOf(c, nm);
+      return `<span class="pre">${nm[c] ? `<a href="#" data-node="${esc(c)}">${esc(c)}</a>` : esc(c)} <i class="badge s-${s}">${esc(STATUS[s] || 'not planned')}</i></span>`;
+    }).join(' <span class="muted">or</span> ') + '</li>').join('');
+  }
 
   // ---------- render ----------
   function render() {
@@ -89,9 +108,10 @@
     $('#warnings').innerHTML = w.map(x => `<li>${esc(x)}</li>`).join('');
   }
 
-  function optRow(key, code, why, act, cls) {
+  function optRow(key, code, why, act, cls, ready) {
+    const dot = ready === undefined ? '' : `<i class="dot ${ready ? 'ok' : ''}" title="${ready ? 'prereqs met' : 'prereqs missing'}"></i>`;
     return `<button class="opt ${cls || ''}" data-act="${act}" data-key="${esc(key)}" data-code="${esc(code)}" title="${act === 'unpin' ? 'Click to unpin' : 'Click to pin'}">` +
-      `${act === 'unpin' ? PIN : ''}<b>${esc(code)}</b>${why ? ` <small title="${esc(why)}">${esc(why)}</small>` : ''}</button>`;
+      `${act === 'unpin' ? PIN : dot}<b>${esc(code)}</b>${why ? ` <small title="${esc(why)}">${esc(why)}</small>` : ''}</button>`;
   }
 
   function optionList(g) {
@@ -103,29 +123,35 @@
 
   function cardBody(g) {
     let h = (g.taken || []).map(c => `<div class="tk">✓ ${esc(c)}</div>`).join('');
-    h += (g.chosen || []).map(c => optRow(g.key, c.code, c.why, c.auto ? 'pin' : 'unpin', 'chosen')).join('');
     if (g.placeholder) {
-      h += `<p class="muted small">pick ${esc(g.need)} of ${esc(g.optionCount)} options</p>
+      h += (g.chosen || []).map(c => optRow(g.key, c.code, c.why, c.auto ? 'pin' : 'unpin', 'chosen')).join('');
+      return h + `<p class="muted small">pick ${esc(g.need)} of ${esc(g.optionCount)} options</p>
         <input type="search" class="filter" data-filter="${esc(g.key)}" placeholder="Filter options" value="${esc(S.filters[g.key] || '')}">
         <div class="optlist" data-list="${esc(g.key)}">${optionList(g)}</div>`;
-    } else if ((g.alternatives || []).length) {
-      h += `<details class="alts" data-key="${esc(g.key)}"${S.openAlts.has(g.key) ? ' open' : ''}><summary>+${g.alternatives.length} alternatives</summary>` +
-        g.alternatives.map(a => optRow(g.key, a.code, a.why, 'pin')).join('') + '</details>';
     }
-    return h;
+    if (!g.choice) return h + (g.chosen || []).map(c => optRow(g.key, c.code, c.why, c.auto ? 'pin' : 'unpin', 'chosen')).join('');
+    // choice group: the owner picks; show every viable option, ready ones first
+    const pins = g.chosen.filter(c => !c.auto), alts = g.alternatives || [], M = pins.length + alts.length;
+    h += pins.length ? `<p class="small">your pick: ${pins.map(c => esc(c.code)).join(', ')}</p>` + pins.map(c => optRow(g.key, c.code, c.why, 'unpin', 'chosen')).join('')
+      : '<p class="small muted">no pick yet</p>';
+    const rows = alts.map(a => optRow(g.key, a.code, a.why, 'pin', '', a.ready)).join('');
+    const open = S.altOpen[g.key] ?? M - g.need <= 6;
+    h += `<details class="alts" data-key="${esc(g.key)}"${open ? ' open' : ''}><summary>show ${M} options</summary>${rows}</details>`;
+    return h + `<button class="btn sm" data-group="${esc(g.key)}">compare prereqs</button>`;
   }
 
   function renderReqs() {
     let h = '', sec = null;
     for (const g of S.model.groups) {
       if (g.section !== sec) { sec = g.section; h += `<h3 class="sec">${esc(sec)}</h3>`; }
-      const head = `<div class="card-h"><b>${esc(g.name)}</b><span class="need">need ${esc(g.need)}</span></div>`;
-      if (g.selected === false) {
-        const others = (g.altGroupKeys || []).map(k => (groupByKey(k) || {}).name || k).join(', ');
-        h += `<div class="card muted">${head}<p class="small">alternative to ${esc(others)}</p>
-          <button class="btn sm" data-act="use" data-key="${esc(g.key)}">use this instead</button>
+      const head = `<div class="card-h"><b>${esc(g.name)}</b><span class="need">${g.choice ? esc(pickLabel(g)) : 'need ' + esc(g.need)}</span></div>`;
+      const others = (g.altGroupKeys || []).map(k => (groupByKey(k) || {}).name || k).join(', ');
+      if (g.selected === false && g.undecided) {
+        h += `<div class="card pick">${head}<p class="small">alternative to ${esc(others)}: pin an option to use this group</p>${cardBody(g)}</div>`;
+      } else if (g.selected === false) {
+        h += `<div class="card muted">${head}<p class="small">alternative to ${esc(others)} (pin an option here to switch)</p>
           <details class="alts"><summary>show options</summary>${cardBody(g)}</details></div>`;
-      } else h += `<div class="card">${head}${cardBody(g)}</div>`;
+      } else h += `<div class="card${g.undecided ? ' pick' : ''}">${head}${cardBody(g)}</div>`;
     }
     $('#reqs').innerHTML = h;
   }
@@ -137,7 +163,8 @@
   }
 
   // Layer = longest path from a source; rows ordered by barycenter of predecessors (one pass).
-  function layout(nodes, edges) {
+  // Choice nodes go under the column of their most advanced option; GE slots get their own lane at the bottom.
+  function layout(nodes, edges, cgroups, lane) {
     const preds = {}; nodes.forEach(n => { preds[n.code] = []; });
     edges.forEach(e => { if (preds[e.to] && preds[e.from]) preds[e.to].push(e.from); });
     const layer = {}, visiting = new Set();
@@ -150,37 +177,85 @@
     nodes.forEach(n => L(n.code));
     const cols = [];
     nodes.forEach(n => (cols[layer[n.code]] = cols[layer[n.code]] || []).push(n));
-    const row = {}, pos = {};
-    cols.forEach((col, li) => {
-      const key = n => { if (!li) return n.status === 'placeholder' ? 1 : 0; const p = preds[n.code].filter(c => c in row); return p.length ? p.reduce((s, c) => s + row[c], 0) / p.length : 1e9; };
+    const row = {}, pos = {}, colY = [];
+    for (let li = 0; li < cols.length; li++) {
+      const col = cols[li] || [];
+      const key = n => { if (!li) return 0; const p = preds[n.code].filter(c => c in row); return p.length ? p.reduce((s, c) => s + row[c], 0) / p.length : 1e9; };
       const k = new Map(col.map(n => [n, key(n)]));
       col.sort((a, b) => k.get(a) - k.get(b));
       col.forEach((n, i) => { row[n.code] = i; pos[n.code] = { x: PAD + li * COLW, y: PAD + i * ROWH }; });
-    });
-    const rows = Math.max(1, ...cols.map(c => c.length));
-    return { pos, w: PAD * 2 + (cols.length - 1) * COLW + NW, h: PAD * 2 + (rows - 1) * ROWH + NH };
+      colY[li] = PAD + col.length * ROWH;
+    }
+    const memo = {}, optL = (c, seen) => {
+      if (c in layer) return layer[c];
+      if (c in memo) return memo[c];
+      if (seen.has(c)) return 0; seen.add(c);
+      const ps = (course(c) ? course(c).pre : []).flat();
+      return (memo[c] = ps.length ? 1 + Math.max(...ps.map(p => optL(p, seen))) : 0);
+    };
+    const cpos = {};
+    let maxX = PAD + Math.max(0, cols.length - 1) * COLW + NW;
+    for (const g of cgroups) {
+      const li = Math.max(0, ...choiceOpts(g).map(o => optL(o.code, new Set())));
+      const y = colY[li] || PAD, x = PAD + li * COLW;
+      cpos[g.key] = { x, y, h: choiceHeight(g) };
+      colY[li] = y + cpos[g.key].h + 30;
+      maxX = Math.max(maxX, x + CW);
+    }
+    let h = Math.max(PAD + NH, ...Object.values(pos).map(p => p.y + NH), ...Object.values(cpos).map(p => p.y + p.h)) + PAD;
+    let laneY = null;
+    if (lane.length) {
+      laneY = h + 20;
+      const perRow = Math.max(3, Math.floor((maxX - PAD + 24) / (NW + 24)));
+      lane.forEach((n, i) => { pos[n.code] = { x: PAD + (i % perRow) * (NW + 24), y: laneY + 20 + Math.floor(i / perRow) * (NH + 20) }; });
+      maxX = Math.max(maxX, PAD + Math.min(lane.length, perRow) * (NW + 24) - 24);
+      h = laneY + 20 + Math.ceil(lane.length / perRow) * (NH + 20) + PAD;
+    }
+    return { pos, cpos, laneY, w: maxX + PAD, h };
+  }
+
+  const choiceRows = g => Math.ceil(Math.min(choiceOpts(g).length, MAXCHIPS + 1) / 2);
+  const choiceHeight = g => (g.selected ? 32 : 46) + choiceRows(g) * 24 + 6;
+  function choiceSvg(g, p) {
+    const opts = choiceOpts(g), shown = opts.length > MAXCHIPS + 1 ? opts.slice(0, MAXCHIPS) : opts, more = opts.length - shown.length;
+    const top = g.selected ? 32 : 46;
+    const chip = (i, inner, attrs) => { const x = 8 + (i % 2) * (CHIPW + 8), y = top + Math.floor(i / 2) * 24;
+      return `<g class="cchip" ${attrs} transform="translate(${x},${y})" tabindex="0" role="button"><rect width="${CHIPW}" height="20" rx="10"/>${inner}</g>`; };
+    const chips = shown.map((o, i) => chip(i, `<circle class="dot${o.ready ? ' ok' : ''}" cx="11" cy="10" r="4"/><text x="20" y="14">${esc(trunc(o.code, 15))}</text>${o.pinned ? `<path class="pinp" transform="translate(${CHIPW - 16},4) scale(.75)" d="${PIN_D}"/>` : ''}`,
+      `data-act="${o.pinned ? 'unpin' : 'pin'}" data-key="${esc(g.key)}" data-code="${esc(o.code)}" aria-label="${esc((o.pinned ? 'Unpin ' : 'Pin ') + o.code + (o.ready ? ', prereqs met' : ', prereqs missing'))}"`)).join('') +
+      (more ? chip(shown.length, `<text class="more" x="${CHIPW / 2}" y="14" text-anchor="middle">+${more} more</text>`, `data-group="${esc(g.key)}" aria-label="All ${opts.length} options"`) : '');
+    return `<g class="cnode${S.detail === 'g:' + g.key ? ' sel' : ''}" data-group="${esc(g.key)}" transform="translate(${p.x},${p.y})" tabindex="0" role="button" aria-label="${esc(pickLabel(g) + ', ' + g.name)}">
+      <title>${esc(pickLabel(g) + ' · ' + g.name)}</title><rect class="box" width="${CW}" height="${p.h}" rx="10"/>
+      <text class="ch" x="10" y="20">${esc(trunc(pickLabel(g) + ' · ' + g.name, 34))}</text>
+      ${g.selected ? '' : `<text class="csub" x="10" y="36">or another group: pin to use this one</text>`}${chips}</g>`;
   }
 
   function renderTree() {
-    const { nodes, edges } = S.model, nm = nodeMap();
-    if (!nodes.length) { $('#tree').innerHTML = '<p class="muted pad">Nothing to show yet.</p>'; return; }
-    const { pos, w, h } = layout(nodes, edges);
+    const { nodes: all, edges } = S.model, nm = nodeMap();
+    if (!all.length) { $('#tree').innerHTML = '<p class="muted pad">Nothing to show yet.</p>'; return; }
+    // CHOOSE: slots of major requirements are drawn as choice nodes; GE slots and courses go to the lane
+    const lane = all.filter(n => isGE(n)), nodes = all.filter(n => !isGE(n) && !n.code.startsWith('CHOOSE: '));
+    const cgroups = S.model.groups.filter(g => g.undecided && !g.placeholder);
+    const { pos, cpos, laneY, w, h } = layout(nodes, edges, cgroups, lane);
     const blocked = e => nm[e.to].status === 'locked' && !['done', 'ip'].includes(nm[e.from].status);
-    const es = edges.filter(e => pos[e.from] && pos[e.to]).sort((a, b) => blocked(a) - blocked(b)).map(e => {
+    const es = edges.filter(e => pos[e.from] && pos[e.to] && nm[e.from] && !isGE(nm[e.from]) && !isGE(nm[e.to])).sort((a, b) => blocked(a) - blocked(b)).map(e => {
       const a = pos[e.from], b = pos[e.to], x1 = a.x + NW, y1 = a.y + NH / 2, x2 = b.x, y2 = b.y + NH / 2, dx = Math.max(40, (x2 - x1) / 2);
       return `<path class="edge${blocked(e) ? ' block' : ''}" d="M${x1} ${y1} C${x1 + dx} ${y1} ${x2 - dx} ${y2} ${x2} ${y2}"/>`;
     }).join('');
-    const ns = nodes.map(n => {
-      const p = pos[n.code], chip = n.planned || n.term || '', ready = n.status === 'ready';
-      const cw = chip ? chip.length * 6.2 + 12 : 0;
-      return `<g class="node s-${esc(n.status)}${S.detail === n.code ? ' sel' : ''}" data-node="${esc(n.code)}" transform="translate(${p.x},${p.y})" tabindex="0" role="button" aria-label="${esc(n.code + ', ' + (STATUS[n.status] || n.status))}">
+    const ns = nodes.concat(lane).map(n => {
+      const p = pos[n.code], chip = n.planned || n.term || '', ready = n.status === 'ready', pinned = n.groupKey && isPinned(n.groupKey, n.code);
+      const cw = chip ? chip.length * 6.2 + 12 : 0, label = n.code.startsWith('CHOOSE: ') ? 'choose: ' + n.title : n.code;
+      return `<g class="node s-${esc(n.status)}${S.detail === n.code ? ' sel' : ''}" data-node="${esc(n.code)}" transform="translate(${p.x},${p.y})" tabindex="0" role="button" aria-label="${esc(n.code + ', ' + (STATUS[n.status] || n.status) + (pinned ? ', pinned' : ''))}">
         <title>${esc(n.code + ' — ' + n.title)}</title><rect class="box" width="${NW}" height="${NH}" rx="8"/>
-        <text class="code" x="10" y="22">${esc(trunc(n.code, Math.floor((NW - cw - 18) / 7.8)))}</text>
-        <text class="ttl" x="10" y="42">${esc(trunc(n.title, ready ? 20 : 31))}</text>${ready ? `<text class="rdy" x="${NW - 10}" y="42" text-anchor="end">ready now</text>` : ''}
+        ${pinned ? `<path class="pinp" transform="translate(8,10) scale(.8)" d="${PIN_D}"/>` : ''}
+        <text class="code" x="${pinned ? 24 : 10}" y="22">${esc(trunc(label, Math.floor((NW - cw - (pinned ? 32 : 18)) / 7.8)))}</text>
+        <text class="ttl" x="10" y="42">${esc(trunc(n.title, ready ? 20 : n.status === "placeholder" ? 27 : 31))}</text>${ready ? `<text class="rdy" x="${NW - 10}" y="42" text-anchor="end">ready now</text>` : ''}
         ${chip ? `<rect class="chip" x="${NW - cw - 8}" y="9" width="${cw}" height="17" rx="8.5"/><text class="chipt" x="${NW - 8 - cw / 2}" y="21" text-anchor="middle">${esc(chip)}</text>` : ''}
       </g>`;
     }).join('');
-    $('#tree').innerHTML = `<svg id="tree-svg" data-w="${w}" data-h="${h}" xmlns="http://www.w3.org/2000/svg"><g id="zoomg">${es}${ns}</g></svg>`;
+    const cs = cgroups.map(g => choiceSvg(g, cpos[g.key])).join('');
+    const ln = laneY == null ? '' : `<line class="lane" x1="${PAD / 2}" x2="${w - PAD / 2}" y1="${laneY - 14}" y2="${laneY - 14}"/><text class="lanet" x="${PAD}" y="${laneY + 6}">General Education</text>`;
+    $('#tree').innerHTML = `<svg id="tree-svg" data-w="${w}" data-h="${h}" xmlns="http://www.w3.org/2000/svg"><g id="zoomg">${es}${ns}${cs}${ln}</g></svg>`;
     applyZoom();
   }
 
@@ -194,39 +269,63 @@
 
   function renderPlan() {
     const nm = nodeMap();
+    const chipFor = c => {
+      const n = nm[c] || {};
+      if (c.startsWith('CHOOSE: ')) return `<button class="pchip choose" ${isGE(n) ? `data-node="${esc(c)}"` : `data-group="${esc(n.groupKey)}"`} title="Decision pending: open the options"><b>choose: ${esc(n.title)}</b><small>${esc(n.units ?? '')} u</small></button>`;
+      return `<button class="pchip s-${esc(n.status || '')}" data-node="${esc(c)}"><b>${esc(c)}</b><span>${esc(titleOf(c, nm))}</span><small>${esc(n.units ?? '')} u</small></button>`;
+    };
     $('#plan').innerHTML = (S.model.plan || []).map(t => `<div class="term${t.beyondExpected ? ' late' : ''}">
       <div class="term-h"><b>${esc(t.term)}</b><span>${esc(t.units)} units</span></div>
       ${t.beyondExpected ? '<span class="tag-late">past expected graduation</span>' : ''}
-      ${t.courses.map(c => `<button class="pchip s-${esc((nm[c] || {}).status || '')}" data-node="${esc(c)}"><b>${esc(c)}</b><span>${esc(titleOf(c, nm))}</span><small>${esc((nm[c] || {}).units ?? '')} u</small></button>`).join('') || '<p class="muted small">No courses</p>'}
+      ${t.courses.map(chipFor).join('') || '<p class="muted small">No courses</p>'}
     </div>`).join('') || '<p class="muted pad">Nothing left to plan.</p>';
   }
 
+  function groupDetail(g, nm) {
+    const others = (g.altGroupKeys || []).map(k => (groupByKey(k) || {}).name || k).join(', ');
+    const rows = choiceOpts(g).map(o => {
+      const c = course(o.code) || {}, pre = preHtml(c.pre, nm);
+      return `<div class="optd${o.pinned ? ' on' : ''}"><div class="optd-h">${o.pinned ? PIN : `<i class="dot${o.ready ? ' ok' : ''}" title="${o.ready ? 'prereqs met' : 'prereqs missing'}"></i>`}
+        <b>${nm[o.code] ? `<a href="#" data-node="${esc(o.code)}">${esc(o.code)}</a>` : esc(o.code)}</b><span class="muted small">${esc(c.u ?? '?')} u</span>
+        <button class="btn sm" data-act="${o.pinned ? 'unpin' : 'pin'}" data-key="${esc(g.key)}" data-code="${esc(o.code)}">${o.pinned ? 'Unpin' : 'Pin'}</button></div>
+        <div class="small">${esc(c.t || 'Not in the course database')}</div>
+        <div class="small muted">Offered: ${esc(offeredText(o.code))}</div>
+        ${pre ? `<ul class="prelist small">${pre}</ul>` : `<div class="small muted">${c.t ? 'No prerequisites' : 'Prerequisites unknown'}</div>`}
+        ${o.why ? `<div class="small muted">${esc(o.why)}</div>` : ''}</div>`;
+    }).join('');
+    return `<button class="close" data-close aria-label="Close">×</button>
+      <h2>${esc(pickLabel(g))}</h2><p>${esc(g.name)}<br><small class="muted">${esc(g.section)}</small></p>
+      ${g.selected ? '' : `<p class="small">Alternative to ${esc(others)}. Pinning an option here uses this group instead.</p>`}
+      <p class="small muted">Green dot: prerequisites done, in progress or pinned. Grey: something is still missing.</p>${rows}`;
+  }
+
   function renderDetail() {
-    const d = $('#detail'), nm = S.model ? nodeMap() : {}, n = nm[S.detail];
-    if (!n) { d.hidden = true; S.detail = null; return; }
-    const g = n.groupKey && groupByKey(n.groupKey);
+    const d = $('#detail'), nm = S.model ? nodeMap() : {}, id = S.detail || '';
+    const grp = id.startsWith('g:') && S.model && groupByKey(id.slice(2)), n = nm[id];
+    if (!grp && !n) { d.hidden = true; S.detail = null; return; }
+    if (grp) { d.innerHTML = groupDetail(grp, nm); d.hidden = false; return; }
+    const g = n.groupKey && groupByKey(n.groupKey), pinned = g && isPinned(g.key, n.code);
     const off = n.offered ? n.offered.split('').map(q => QTR[q] || q).join(', ') : 'Not currently offered';
-    const pre = (n.prereqs || []).map(og => '<li>' + og.map(c => {
-      const s = statusOf(c, nm);
-      return `<span class="pre">${nm[c] ? `<a href="#" data-node="${esc(c)}">${esc(c)}</a>` : esc(c)} <i class="badge s-${s}">${esc(STATUS[s] || 'not planned')}</i></span>`;
-    }).join(' <span class="muted">or</span> ') + '</li>').join('');
+    const pre = preHtml(n.prereqs, nm);
     d.innerHTML = `<button class="close" data-close aria-label="Close">×</button>
-      <h2>${esc(n.code)}</h2><p>${esc(n.title)}</p>
+      <h2>${pinned ? PIN + ' ' : ''}${esc(n.code)}</h2><p>${esc(n.title)}</p>
+      ${pinned ? `<p><button class="btn sm" data-act="unpin" data-key="${esc(g.key)}" data-code="${esc(n.code)}">Unpin</button></p>` : ''}
       <dl><dt>Status</dt><dd><i class="badge s-${esc(n.status)}">${esc(STATUS[n.status] || n.status)}</i></dd>
       <dt>Units</dt><dd>${esc(n.units)}</dd>
       ${n.term ? `<dt>Taken</dt><dd>${esc(n.term)}</dd>` : ''}${n.planned ? `<dt>Planned</dt><dd>${esc(n.planned)}</dd>` : ''}
       <dt>Offered</dt><dd>${esc(off)}</dd>
       ${g ? `<dt>Satisfies</dt><dd>${esc(g.name)}<br><small class="muted">${esc(g.section)}</small></dd>` : ''}</dl>
+      ${g && !g.placeholder && (g.choice || (g.altGroupKeys || []).length) ? `<p><a href="#" data-group="${esc(g.key)}">All options for this requirement</a></p>` : ''}
       <h3>Prerequisites</h3>${pre ? `<ul class="prelist">${pre}</ul>` : '<p class="muted">None</p>'}
       ${n.status === 'placeholder' ? '<p class="muted small">Pick a specific course for this slot in the requirements panel.</p>' : ''}
       ${n.note ? `<h3>Note</h3><p>${esc(n.note)}</p>` : ''}`;
     d.hidden = false;
   }
 
-  function openDetail(code) {
-    S.detail = code; renderDetail();
-    document.querySelectorAll('.node.sel').forEach(e => e.classList.remove('sel'));
-    document.querySelectorAll('.node').forEach(e => { if (e.dataset.node === code) e.classList.add('sel'); });
+  function openDetail(id) {
+    S.detail = id; renderDetail();
+    document.querySelectorAll('.node.sel,.cnode.sel').forEach(e => e.classList.remove('sel'));
+    document.querySelectorAll(id.startsWith('g:') ? '.cnode' : '.node').forEach(e => { if ((id.startsWith('g:') ? 'g:' + e.dataset.group : e.dataset.node) === id) e.classList.add('sel'); });
   }
 
   // ---------- choices ----------
@@ -235,8 +334,8 @@
     const a = (S.opts.choices[key] || []).filter(c => c !== code); a.push(code);
     while (a.length > Math.max(1, g.need || 1)) a.shift();
     S.opts.choices[key] = a;
-    // pinning inside a losing subgroup means "this one wins": drop pins that would keep its rivals winning
-    if (g.selected === false) (g.altGroupKeys || []).forEach(k => delete S.opts.choices[k]);
+    // pinning inside a losing subgroup (the set is already decided) means "this one wins": drop the rivals' pins
+    if (g.selected === false && !g.undecided) (g.altGroupKeys || []).forEach(k => delete S.opts.choices[k]);
     commit();
   }
   function unpin(key, code) {
@@ -247,7 +346,7 @@
 
   // ---------- events ----------
   document.addEventListener('click', e => {
-    const t = e.target.closest('[data-act],[data-node],[data-tab],[data-zoom],[data-sample],[data-close]');
+    const t = e.target.closest('[data-act],[data-node],[data-group],[data-tab],[data-zoom],[data-sample],[data-close]');
     if (!t) return;
     if (t.dataset.sample !== undefined) {
       if (!Array.isArray(window.SAMPLE_LINES)) return showError('Sample audit (sample/dars-lines.js) did not load.');
@@ -260,19 +359,15 @@
     const { act, key, code } = t.dataset;
     if (act === 'pin') pin(key, code);
     else if (act === 'unpin') unpin(key, code);
-    else if (act === 'use') {
-      const g = groupByKey(key); if (!g) return;
-      const best = ((g.alternatives || [])[0] || (g.chosen || [])[0] || {}).code || (g.options || [])[0];
-      if (best) pin(key, best);
-    }
+    else if (t.dataset.group) { e.preventDefault(); openDetail('g:' + t.dataset.group); }
   });
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && S.detail) { S.detail = null; renderDetail(); }
-    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('.node')) { e.preventDefault(); openDetail(e.target.dataset.node); }
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('.node,.cnode,.cchip')) { e.preventDefault(); e.target.dispatchEvent(new MouseEvent('click', { bubbles: true })); }
   });
   document.addEventListener('toggle', e => {
     const k = e.target.matches && e.target.matches('details.alts[data-key]') && e.target.dataset.key;
-    if (k) e.target.open ? S.openAlts.add(k) : S.openAlts.delete(k);
+    if (k) S.altOpen[k] = e.target.open;
   }, true);
   document.addEventListener('input', e => {
     const k = e.target.dataset && e.target.dataset.filter; if (k === undefined) return;

@@ -13,7 +13,6 @@
     const taken = Object.assign({}, parsed.taken);
     for (const [c, t] of Object.entries(parsed.taken)) if (ALIAS[c] && !taken[ALIAS[c]]) taken[ALIAS[c]] = Object.assign({}, t, { via: c });
     const chosenBy = new Map(); // code -> groupKey that plans it
-    const met = c => !!taken[c] || chosenBy.has(c);
 
     // count checks: compare against the itemized groups of the section right before
     parsed.sections.forEach((s, i) => s.groups.forEach(gr => {
@@ -27,26 +26,27 @@
     for (const s of parsed.sections) {
       const sec = [];
       s.groups.forEach((gr, i) => {
-        if (!gr.options.length) return;
-        const slots = [], unknown = [], all = [];
+        if (!gr.options.length && !gr.undeclared) return;
+        const slots = [], all = [];
         for (const o of gr.options) {
           const codes = o.to ? Object.keys(COURSES).filter(k => { const sc = DARS.splitCode(k); return sc.dept === o.dept && numOf(sc.num) >= numOf(o.num) && numOf(sc.num) <= numOf(o.to); }) : o.alts;
           all.push(...codes);
-          unknown.push(...codes.filter(c => !COURSES[c]));
-          const known = codes.filter(c => COURSES[c]);
-          if (o.to) known.forEach(c => slots.push([c])); else if (known.length) slots.push(known);
+          if (o.to) codes.forEach(c => slots.push([c])); else if (codes.length) slots.push(codes);
         }
         const options = [...new Set(all)];
         const out = { key: s.title + '|' + gr.name + '|' + i, section: s.title, name: gr.name, need: gr.needCourses, taken: gr.taken,
-          chosen: [], alternatives: [], placeholder: !slots.length, optionCount: options.length, options, selected: true, altGroupKeys: [],
-          _slots: slots, _unknown: [...new Set(unknown)], _notFrom: gr.notFrom, _ew: EW.test(s.title), _writing: /WRITING/.test(s.title),
+          chosen: [], alternatives: [], placeholder: !gr.undeclared && !all.some(c => COURSES[c]), choice: false, undeclared: !!gr.undeclared, undecided: false, optionCount: options.length, options, selected: true, altGroupKeys: [],
+          _slots: slots, _notFrom: gr.notFrom, _orPrev: !!gr.orPrev, _ew: EW.test(s.title), _writing: /WRITING/.test(s.title),
           _slotUnits: gr.needUnits && gr.needCourses ? gr.needUnits / gr.needCourses : 4 };
         sec.push(out); groups.push(out);
       });
       if (sec.length) bySection.push({ s, sec });
     }
     const writingGroups = groups.filter(x => x._writing);
-    const writingOpen = () => writingGroups.some(w => !w.options.some(c => chosenBy.has(c)));
+    const writingOpen = () => writingGroups.some(w => !w.chosen.length && !(choices[w.key] || []).length);
+    // "ready" = every prereq is done, in progress or pinned (not merely planned)
+    const pinned = new Set(Object.values(choices).flat());
+    const met = c => !!taken[c] || pinned.has(c);
 
     // unmet transitive prereqs; OR-groups take the cheapest alternative
     function unmet(code) {
@@ -61,56 +61,90 @@
       return out;
     }
     const nameOf = key => groups.find(x => x.key === key).name.toLowerCase();
-    function score(code, gr) {
-      const c = COURSES[code], why = [], u = [...unmet(code)];
-      let s = 0;
-      if (u.length) { s += u.length; why.push(`needs ${plural(u.length, 'prereq')} not yet planned (${u.join(', ')})`); }
-      else why.push(c.pre.length ? 'all prereqs done or planned' : c.note ? c.note.replace(/\.$/, '') : 'no prereqs');
-      if (c.off === '') { s += 100; why.push('not offered 2025-27'); }
-      if (gr._ew && chosenBy.has(code)) { s -= 50; why.push(`already in the plan for ${nameOf(chosenBy.get(code))}, so it counts twice`); }
-      if (gr._ew && c.w2 && writingOpen()) { s -= 3; why.push('also satisfies Engineering Writing'); }
-      if (c.rec) { s -= 0.1 * c.rec; why.push('strong aerospace relevance'); }
-      s += 0.01 * c.u;
-      const w = why.join('; ');
-      return { code, s, why: w[0].toUpperCase() + w.slice(1) + '.' };
+    const cmpCode = (a, b) => { const x = DARS.splitCode(a) || { dept: a, num: '' }, y = DARS.splitCode(b) || { dept: b, num: '' }; return x.dept.localeCompare(y.dept) || (numOf(x.num) || 0) - (numOf(y.num) || 0) || a.localeCompare(b); };
+    // overlap info only (ethics/writing double counting); never used to choose
+    function extras(code, gr) {
+      const c = COURSES[code], by = chosenBy.get(code), w = [];
+      if (gr._ew && by && by !== gr.key) w.push(`already planned for ${nameOf(by)}, counts for both`);
+      else if (c && c.w2 && !gr._writing) w.push(gr._ew && !gr._writing && writingOpen() ? 'also satisfies Engineering Writing' : 'writing credit');
+      return w;
     }
+    function facts(code, gr) {
+      const c = COURSES[code];
+      if (!c) return { code, ready: false, unmet: 0, why: ['not in course database'].concat(extras(code, gr)).join('; '), _k: 1 };
+      const u = [...unmet(code)];
+      return { code, ready: !u.length, unmet: u.length, _k: 0,
+        why: [u.length ? `needs ${plural(u.length, 'prereq')}: ${u.join(', ')}` : c.pre.length ? 'prereqs met' : 'no prereqs'].concat(extras(code, gr)).join('; ') };
+    }
+    const byReadiness = (a, b) => b.ready - a.ready || a._k - b._k || a.unmet - b.unmet || cmpCode(a.code, b.code);
 
     function choose(gr) {
       const pins = (choices[gr.key] || []).filter(c => gr.options.includes(c));
-      const chosen = pins.map(c => { const sc = COURSES[c] && !gr.placeholder ? score(c, gr) : { s: 0, why: '' }; return { code: c, auto: false, why: ('Pinned by you. ' + sc.why).trim(), s: sc.s }; });
-      let alts = [];
-      if (gr.placeholder) {
-        const n = Math.max(0, gr.need - pins.length);
-        for (let i = 1; i <= n; i++) chosen.push({ code: 'GE: ' + gr.name + (n > 1 ? ' #' + i : ''), auto: true, why: 'Pick any approved course from this list; the plan holds a slot for it.', s: 0 });
-      } else {
-        const ok = c => !gr._notFrom.includes(c) && !taken[c] && (gr._ew || !chosenBy.has(c));
-        const slots = gr._slots.filter(sl => !sl.some(c => pins.includes(c))).map(sl => sl.filter(ok).map(c => score(c, gr)).sort((a, b) => a.s - b.s)).filter(sl => sl.length).sort((a, b) => a[0].s - b[0].s);
-        const k = Math.max(0, gr.need - pins.length);
-        slots.slice(0, k).forEach(sl => chosen.push({ code: sl[0].code, auto: true, why: sl[0].why, s: sl[0].s }));
-        alts = slots.slice(0, k).flatMap(sl => sl.slice(1)).concat(slots.slice(k).flat()).sort((a, b) => a.s - b.s)
-          .concat(gr._unknown.filter(c => !pins.includes(c)).map(c => ({ code: c, why: 'not in course database' })));
+      gr.chosen = pins.map(c => ({ code: c, auto: false, why: gr.placeholder ? 'pinned by you' : 'pinned by you; ' + facts(c, gr).why }));
+      const k = Math.max(0, gr.need - pins.length);
+      if (gr.undeclared) { // TBA not declared yet: nothing to list, but the plan must still hold the courses
+        gr.choice = true; gr._open = k;
+        warnings.push(`${gr.section}: no technical breadth area is declared, so the plan holds ${plural(k, 'open slot')}. Declare one at my.engineering.ucla.edu and re-export the audit.`);
+        return;
       }
-      gr.chosen = chosen.map(({ code, auto, why }) => ({ code, auto, why }));
-      gr.alternatives = alts.map(({ code, why }) => ({ code, why }));
-      // pinned groups win subgroup picks
-      gr._total = chosen.reduce((t, c) => t + c.s, 0) - 1000 * pins.length;
+      if (gr.placeholder) {
+        for (let i = 1; i <= k; i++) gr.chosen.push({ code: 'GE: ' + gr.name + (k > 1 ? ' #' + i : ''), auto: true, why: 'Pick any approved course from this list; the plan holds a slot for it.' });
+      } else {
+        // viable = not excluded, not already used (ethics/writing may double count), not known to be never offered
+        const ok = c => !gr._notFrom.includes(c) && !taken[c] && (gr._ew || !chosenBy.has(c));
+        const never = c => COURSES[c] && COURSES[c].off === '';
+        const slots = gr._slots.filter(sl => !sl.some(c => pins.includes(c)))
+          .map(sl => ({ v: sl.filter(c => ok(c) && !never(c)), off: sl.filter(c => ok(c) && never(c)) })).filter(sl => sl.v.length);
+        // ethics/writing: a course already required elsewhere that is on this list satisfies it outright (e.g. 157W for Writing II)
+        const overlap = gr._ew ? slots.map(sl => sl.v.find(c => chosenBy.has(c) && chosenBy.get(c) !== gr.key)).filter(Boolean) : [];
+        if (overlap.length && overlap.length >= k) {
+          for (const c of overlap.slice(0, k)) gr.chosen.push({ code: c, auto: true, why: `already required for ${nameOf(chosenBy.get(c))}; it is on this list, so it counts here too` });
+        } else if (slots.length > k) { // the owner decides: only pins are chosen, every viable option is listed
+          gr.choice = true;
+          gr.alternatives = slots.flatMap(sl => sl.v).map(c => facts(c, gr)).sort(byReadiness).map(({ code, ready, unmet, why }) => ({ code, ready, unmet, why }));
+          gr._open = k;
+        } else {
+          if (slots.length < k) warnings.push(`${gr.name}: audit lists fewer options than it needs (${pins.length + slots.length} of ${gr.need}).`);
+          const n = pins.length + slots.length;
+          for (const sl of slots) {
+            if (sl.v.length === 1) {
+              gr.chosen.push({ code: sl.v[0], auto: true, why: [`required: ${n} of ${n}`].concat(sl.off.length ? [sl.off.join(', ') + ' never offered'] : [], extras(sl.v[0], gr)).join('; ') });
+              continue;
+            }
+            // "157 OR 157W" with both offered: that slot is its own pick-1 choice
+            const sub = Object.assign({}, gr, { key: gr.key + '|' + sl.v.join(' OR '), name: sl.v.join(' OR '), need: 1, taken: [], options: sl.v, optionCount: sl.v.length,
+              _slots: sl.v.map(c => [c]), _notFrom: [], _slotUnits: COURSES[sl.v[0]].u, _parent: gr });
+            groups.splice(groups.indexOf(gr) + 1, 0, sub);
+            choose(sub);
+          }
+        }
+      }
       for (const c of gr.chosen) if (!chosenBy.has(c.code)) chosenBy.set(c.code, gr.key);
     }
-    function pick(set, k) {
-      if (k >= set.length) return;
-      const keep = [...set].sort((a, b) => a._total - b._total).slice(0, k);
+    const groupUnits = x => x.placeholder || x.choice ? x._slotUnits * x.need : x.chosen.reduce((u, c) => u + ((COURSES[c.code] || {}).u || 4), 0);
+    const altSlots = []; // CHOOSE: <section> while a pick-k-of-subgroups is unresolved
+    function resolve(set, k, title) {
+      const pickedSet = set.filter(x => (choices[x.key] || []).some(c => x.options.includes(c))).slice(0, k);
       for (const x of set) {
-        x.selected = keep.includes(x);
+        x.selected = pickedSet.includes(x);
         x.altGroupKeys = set.filter(y => y !== x).map(y => y.key);
+        x.undecided = !x.selected && pickedSet.length < k;
         if (!x.selected) for (const [c, key] of chosenBy) if (key === x.key) chosenBy.delete(c);
       }
+      const rest = set.filter(x => !x.selected), units = Math.min(...rest.map(groupUnits));
+      for (let i = pickedSet.length; i < k; i++) altSlots.push({ code: 'CHOOSE: ' + title + (k - pickedSet.length > 1 ? ' #' + (i - pickedSet.length + 1) : ''), units, groupKey: rest[0].key, title });
     }
-    // ethics/writing last so the writing course chosen elsewhere (157W) is known
+    // ethics/writing last so overlap info (157W in the core) is known
     for (const { s, sec } of bySection.filter(b => !EW.test(b.s.title)).concat(bySection.filter(b => EW.test(b.s.title)))) {
       sec.forEach(choose);
-      if (s.needSubgroups) pick(sec, s.needSubgroups);
-      else for (const name of new Set(sec.map(x => x.name))) { const same = sec.filter(x => x.name === name); if (same.length > 1) pick(same, 1); }
+      if (s.needSubgroups) { if (sec.length > s.needSubgroups) resolve(sec, s.needSubgroups, s.title); continue; }
+      // same-name groups, and groups the audit printed "OR)" before, are alternatives (pick 1)
+      const id = sec.map((x, i) => i);
+      sec.forEach((x, i) => { id[i] = x._orPrev && i ? id[i - 1] : id[sec.findIndex(y => y.name === x.name)]; });
+      for (const r of new Set(id)) { const set = sec.filter((x, i) => id[i] === r); if (set.length > 1) resolve(set, 1, s.title); }
     }
+    for (const gr of groups) if (gr._parent) gr.selected = gr._parent.selected;
+    for (const gr of groups) if (gr.choice && gr.selected && gr._open) gr.undecided = true;
 
     // nodes: taken + chosen + transitive prereqs
     const nodes = new Map();
@@ -124,6 +158,10 @@
       if (c.code.startsWith('GE: ')) add(c.code, { title: gr.name, units: gr._slotUnits, offered: 'FWS', status: 'placeholder', groupKey: gr.key });
       else add(c.code, { groupKey: chosenBy.get(c.code) || gr.key });
     }
+    // pending decisions hold their units in the plan; scheduled like GE slots
+    const slot = (code, title, units, groupKey) => { let c = code, i = 2; while (nodes.has(c)) c = code + ' (' + i++ + ')'; add(c, { title, units, offered: 'FWS', status: 'placeholder', groupKey, prereqs: [] }); };
+    for (const gr of groups) if (gr.undecided && gr.selected) for (let i = 1; i <= gr._open; i++) slot('CHOOSE: ' + gr.name + (gr._open > 1 ? ' #' + i : ''), gr.name, gr._slotUnits, gr.key);
+    for (const a of altSlots) slot(a.code, a.title, a.units, a.groupKey);
     const stack = [...nodes.keys()].filter(c => !taken[c]);
     while (stack.length) for (const grp of nodes.get(stack.pop()).prereqs) {
       const m = grp.find(x => nodes.has(x)) || grp[0];

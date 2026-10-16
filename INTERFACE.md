@@ -29,11 +29,13 @@ already used in parser.js and courses.js.
 model = {
   currentTerm, expectedTerm, warnings: string[],
   groups: [{ key, section, name, need, taken: string[],
-             chosen: [{ code, auto: boolean, why: string }],           // what the plan uses
-             alternatives: [{ code, why: string }],                     // not chosen, sorted best first
-             placeholder: boolean,   // true when options aren't in COURSES (GE etc) -> plan uses a slot named by group
+             chosen: [{ code, auto: boolean, why: string }],           // what the plan uses (auto:false = pinned)
+             alternatives: [{ code, ready: boolean, unmet: number, why: string }], // choice groups only, see below
+             placeholder: boolean,   // true when no option is in COURSES (GE etc) -> plan uses a slot named by group
+             choice: boolean,        // more viable options than needed: the user picks, nothing is auto-chosen
+             undecided: boolean,     // a pick is still pending here (open choice slots, or an unresolved alternative group)
              optionCount: number, options: string[] /* all codes, for a search box */,
-             selected: boolean,      // false when this group lost a pick-k-of-subgroups choice
+             selected: boolean,      // true when this group counts toward the plan (see alternatives below)
              altGroupKeys: string[] }], 
   nodes: [{ code, title, units, status: 'done'|'ip'|'ready'|'locked'|'placeholder',
             term?: 'WI26' /* when taken */, planned?: 'WI27', groupKey?, offered: string, note?: string,
@@ -44,5 +46,37 @@ model = {
 }
 ```
 Group key: `section + '|' + name + '|' + index` (stable across rebuilds).
+
+### Selection rules (the model never picks between real options for the user)
+- `viable` options of a group = options minus `notFrom`, minus taken courses, minus courses already used by another
+  requirement (ethics/writing groups may reuse them), minus courses with `off === ''`. Courses not in COURSES and
+  `off === '?'` stay viable. An option like "157 OR 157W" is one slot; never-offered alts are dropped from it.
+- `viable <= need`: every viable slot is chosen, `auto: true`, `why` starts `required: N of N` (plus e.g.
+  `MECH&AE 157 never offered`). Fewer than needed adds the warning "audit lists fewer options than it needs".
+  A slot that still has 2+ viable alts becomes its own choice group (need 1, key `<parent key>|A OR B`,
+  name `A OR B`), inserted right after its parent.
+- `viable > need`: `choice: true`; `chosen` holds only pins (`auto: false`); `alternatives` lists every unpinned
+  viable option sorted ready first, then fewest unmet transitive prereqs, then course-number order.
+  `ready` = every prereq AND-group has a done/in-progress/pinned member; `unmet` = count of missing transitive prereqs;
+  `why` is a short fact ("prereqs met", "no prereqs", "needs 2 prereqs: MECH&AE 103, MECH&AE 105A",
+  "not in course database", "writing credit", "also satisfies Engineering Writing",
+  "already planned for <group>, counts for both"). Nothing is labeled recommended.
+- Alternative groups (pick k of a section's groups when it has more than k; same-name groups; `orPrev` pairs)
+  are never auto-resolved: a group is `selected` only when it has a pin (or there is no choice). While fewer than k
+  are pinned, every unpinned group in the set is `selected: false, undecided: true` and the plan holds one
+  `CHOOSE: <section title>` slot per missing pick (units of the smallest alternative). Once k groups have pins the
+  rest are `selected: false, undecided: false` (pinning in one of those switches; the UI drops the rivals' pins).
+- Placeholder (GE) groups: unchanged; one `GE: <group name>[ #i]` slot node per needed course until pinned.
+
+### Pending-decision slots
+Each open slot of a selected choice group is a node `CHOOSE: <group name>[ #i]` (status `placeholder`,
+`groupKey`, units = needUnits/need or 4, no prereqs). A section-level `CHOOSE: <section title>` carries the
+`groupKey` of the first undecided alternative group. These, like `GE:` slots, are scheduled last in the plan so
+unit totals stay honest. The UI draws non-GE `CHOOSE:` slots as one choice node per undecided group instead,
+and puts GE groups' nodes in a separate "General Education" lane.
 Node status: done = taken with a non-IP grade; ip = in progress; ready = every prereq AND-group has a done/ip member;
-locked = otherwise; placeholder = GE/elective slot. Placeholder node code format: `GE: <group name>`.
+locked = otherwise; placeholder = GE/elective slot or pending choice. Placeholder node codes: `GE: <group name>`,
+`CHOOSE: <group or section name>`.
+
+`opts.choices[groupKey]` pins: kept up to `need` per group (UI drops the oldest); a pin must be one of the group's
+`options`. Pinning in an alternative group selects that group.

@@ -20,24 +20,29 @@
         const avail = options.filter(c => !has(c) && !pins.includes(c) && !used.has(c) && (placeholder || C[c]))
           .sort((a, b) => ((C[b] || {}).rec || 0) - ((C[a] || {}).rec || 0));
         const chosen = pins.map(code => ({ code, auto: false, why: 'pinned by you' }));
-        if (!placeholder) while (chosen.length < need && avail.length) { const code = avail.shift(); chosen.push({ code, auto: true, why: (C[code].rec ? 'aero relevance ' + C[code].rec : 'required / earliest available') }); }
+        const choice = !placeholder && avail.length > need - pins.length; // more options than slots: the user decides
+        if (!placeholder && !choice) while (chosen.length < need && avail.length) { const code = avail.shift(); chosen.push({ code, auto: true, why: (C[code].rec ? 'aero relevance ' + C[code].rec : 'required / earliest available') }); }
         chosen.forEach(c => used.add(c.code));
-        const grp = { key, section: s.title, name: gr.name, need, taken: gr.taken, chosen, alternatives: avail.map(code => ({ code, why: C[code] ? 'offered ' + (C[code].off || 'not offered') : 'GE option' })),
-          placeholder, optionCount: options.length, options, selected: true, altGroupKeys: [] };
+        const grp = { key, section: s.title, name: gr.name, need, taken: gr.taken, chosen, alternatives: choice ? avail.map(code => { const u = ((C[code] || {}).pre || []).filter(og => !og.some(has)).length; return { code, ready: !!C[code] && !u, unmet: u, why: C[code] ? (u ? 'needs ' + u + ' prereqs' : 'prereqs met') : 'not in course database' }; }) : [],
+          placeholder, choice, undecided: choice && chosen.length < need, optionCount: options.length, options, selected: true, altGroupKeys: [] };
         sec.push(grp); groups.push(grp);
       });
       // pick-k-of-subgroups and same-name alternatives
-      const sets = s.needSubgroups ? [sec] : Object.values(sec.reduce((m, x) => ((m[x.name] = m[x.name] || []).push(x), m), {})).filter(a => a.length > 1);
+      const sets = s.needSubgroups ? (sec.length > s.needSubgroups ? [sec] : []) : Object.values(sec.reduce((m, x) => ((m[x.name] = m[x.name] || []).push(x), m), {})).filter(a => a.length > 1);
       for (const set of sets) {
         const k = s.needSubgroups || 1; const order = set.slice().sort((a, b) => ((choices[b.key] || []).length > 0) - ((choices[a.key] || []).length > 0));
-        order.forEach((x, j) => { x.selected = j < k; x.altGroupKeys = set.filter(y => y !== x).map(y => y.key); });
+        const picked = order.filter(x => (choices[x.key] || []).length).length;
+        order.forEach((x, j) => { x.selected = j < picked && j < k; x.undecided = !x.selected && picked < k; x.altGroupKeys = set.filter(y => y !== x).map(y => y.key); });
       }
     });
     const nodes = {}, add = (code, extra) => { if (nodes[code]) return nodes[code]; const c = C[code] || {}; return nodes[code] = Object.assign({ code, title: c.t || (taken[code] || {}).title || code, units: c.u || (taken[code] || {}).units || 4, offered: c.off || '', note: c.note, prereqs: c.pre || [] }, extra); };
     for (const grp of groups) if (grp.selected) {
       if (grp.placeholder) add('GE: ' + grp.name, { status: 'placeholder', groupKey: grp.key, title: grp.name, units: 4, offered: 'FWS', prereqs: [] });
       else for (const c of grp.chosen) add(c.code, { groupKey: grp.key });
+      if (grp.choice && grp.undecided) for (let i = grp.chosen.length; i < grp.need; i++) add('CHOOSE: ' + grp.name + (i ? ' #' + (i + 1) : ''), { status: 'placeholder', groupKey: grp.key, title: grp.name, units: 4, offered: 'FWS', prereqs: [] });
     }
+    // stub-only check: choice groups carry only pins in chosen, and readiness on every alternative
+    for (const grp of groups) if (grp.choice) console.assert(grp.chosen.every(c => !c.auto) && grp.alternatives.every(a => typeof a.ready === 'boolean' && typeof a.unmet === 'number' && typeof a.why === 'string'), 'stub choice shape', grp.key);
     // pull in prereqs transitively (taken ones become done/ip nodes)
     for (let changed = true; changed;) { changed = false; for (const n of Object.values(nodes)) for (const og of n.prereqs) for (const p of og) if (!nodes[p] && C[p] && (has(p) || og.length === 1)) { add(p, {}); changed = true; } }
     for (const n of Object.values(nodes)) { const h = has(n.code); if (h) { n.status = h; n.term = taken[n.code].term; } }

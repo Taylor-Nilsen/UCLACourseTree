@@ -65,6 +65,7 @@ button, input { font: inherit; color: inherit; }
 .sec { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 14px 0 6px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
 .card.muted { opacity: .7; }
+.card.pick { border: 1.5px dashed var(--ready); }
 .card.muted p { margin: 4px 0; }
 .card-h { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
 .card-h b { font-size: 13px; }
@@ -106,6 +107,23 @@ button, input { font: inherit; color: inherit; }
 .s-locked .code { fill: var(--muted); }
 .s-placeholder .box { fill: var(--ph-bg); stroke: var(--ph); stroke-dasharray: 5 4; }
 .node.sel .box, .node:focus-visible .box { stroke: var(--accent); stroke-width: 3; }
+.node .pinp, .cnode .pinp { fill: var(--accent); }
+.cnode { cursor: pointer; }
+.cnode:focus { outline: none; }
+.cnode .box { fill: var(--ph-bg); stroke: var(--ready); stroke-width: 2; stroke-dasharray: 7 4; }
+.cnode.sel .box, .cnode:focus-visible .box { stroke: var(--accent); stroke-width: 3; }
+.cnode .ch { font-weight: 700; font-size: 12px; fill: var(--ph); }
+.cnode .csub { font-size: 10px; fill: var(--muted); }
+.cchip rect { fill: var(--card); stroke: var(--line); }
+.cchip:hover rect, .cchip:focus-visible rect { stroke: var(--accent); }
+.cchip:focus { outline: none; }
+.cchip text { font-size: 11px; fill: var(--fg); }
+.cchip .more { fill: var(--accent); }
+.cchip .dot { fill: var(--locked); } .cchip .dot.ok { fill: var(--done); }
+.lane { stroke: var(--line); stroke-width: 1; }
+.lanet { font-size: 12px; font-weight: 700; fill: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
+.dot { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--locked); align-self: center; font-style: normal; }
+.dot.ok { background: var(--done); }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; font-size: 12px; color: var(--muted); }
 .legend i { display: inline-block; width: 14px; height: 10px; border-radius: 3px; border: 1.5px solid; vertical-align: -1px; margin-right: 4px; }
 .legend .s-done { background: var(--done-bg); border-color: var(--done); }
@@ -113,6 +131,7 @@ button, input { font: inherit; color: inherit; }
 .legend .s-ready { background: var(--ready-bg); border-color: var(--ready); }
 .legend .s-locked { background: var(--locked-bg); border: 1.5px dashed var(--locked); }
 .legend .s-placeholder { background: var(--ph-bg); border: 1.5px dashed var(--ph); }
+.legend .s-choice { background: var(--ph-bg); border: 1.5px dashed var(--ready); }
 .legend .blk { height: 0; border-width: 1px; border-color: var(--block); border-radius: 0; }
 
 .plan { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 8px; align-items: flex-start; }
@@ -126,6 +145,8 @@ button, input { font: inherit; color: inherit; }
 .pchip small { color: var(--muted); }
 .pchip.s-ready { border-left-color: var(--ready); } .pchip.s-locked { border-left-color: var(--locked); } .pchip.s-placeholder { border-left-color: var(--ph); }
 .pchip:hover { border-color: var(--accent); }
+.pchip.choose { border: 1.5px dashed var(--ready); border-left-width: 4px; background: var(--ph-bg); color: var(--ph); }
+.pchip.choose b { display: block; font-size: 13px; overflow-wrap: anywhere; }
 
 .detail { position: fixed; top: 0; right: 0; bottom: 0; width: min(360px, 100vw); overflow-y: auto; background: var(--card); border-left: 1px solid var(--line); box-shadow: -6px 0 24px rgba(0,0,0,.15); padding: 16px; z-index: 10; }
 .detail h2 { margin: 0 32px 4px 0; font-size: 18px; }
@@ -135,7 +156,13 @@ button, input { font: inherit; color: inherit; }
 .detail dd { margin: 0; }
 .detail a { color: var(--accent); }
 .close { position: absolute; top: 10px; right: 10px; width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); cursor: pointer; font-size: 18px; line-height: 1; }
-.prelist { margin: 0; padding-left: 18px; } .prelist li { margin-bottom: 4px; }
+.prelist { margin: 0; padding-left: 18px; }
+.optd { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; margin: 6px 0; }
+.optd.on { background: var(--ip-bg); }
+.optd-h { display: flex; align-items: center; gap: 6px; }
+.optd-h .btn { margin-left: auto; }
+.optd .prelist { margin: 2px 0; }
+.optd div { margin-top: 2px; } .prelist li { margin-bottom: 4px; }
 .pre { white-space: nowrap; }
 .badge { font-style: normal; font-size: 11px; padding: 1px 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); }
 .badge.s-done { background: var(--done-bg); border-color: var(--done); } .badge.s-ip { background: var(--ip-bg); border-color: var(--ip); }
@@ -177,7 +204,7 @@ button, input { font: inherit; color: inherit; }
         <div id="tree" class="scroll"></div>
         <div class="legend">
           <span><i class="s-done"></i>done</span><span><i class="s-ip"></i>in progress</span><span><i class="s-ready"></i>ready now</span>
-          <span><i class="s-locked"></i>locked</span><span><i class="s-placeholder"></i>GE / elective slot</span><span><i class="blk"></i>blocking prerequisite</span>
+          <span><i class="s-locked"></i>locked</span><span><i class="s-placeholder"></i>GE / elective slot</span><span><i class="s-choice"></i>your pick (green dot: prereqs met)</span><span><i class="blk"></i>blocking prerequisite</span>
         </div>
       </section>
       <section id="plan-view" hidden><div id="plan" class="plan"></div></section>
