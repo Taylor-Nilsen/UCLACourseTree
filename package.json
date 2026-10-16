@@ -4,7 +4,7 @@
   "private": true,
   "description": "Turn a UCLA DARS degree-audit PDF into a prerequisite skill tree and quarter-by-quarter plan (Aerospace Engineering BS).",
   "scripts": {
-    "test": "node test/parser.test.mjs && node test/model.test.mjs && node test/coursedb.test.mjs",
+    "test": "node test/parser.test.mjs && node test/model.test.mjs && node test/coursedb.test.mjs && node test/export.test.mjs",
     "start": "python3 -m http.server 8080"
   }
 }
