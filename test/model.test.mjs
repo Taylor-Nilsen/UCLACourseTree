@@ -203,13 +203,35 @@ t('sample 2 undecided: each path exposes its per-course prereq chain; prereqs of
   assert.deepEqual(into, ['BIOENGR 167L', 'BIOENGR 176']);
 });
 const pick = i => MODEL.build(p2, { choices: { ['path:' + cap.key]: [cap.paths[i].groupKey] } });
-t('choosing path 2 plans 177C (not a standalone tree node: it folds into the card); 177A/B are neither planned nor nodes', () => {
-  const b = pick(1), nd = b.nodes.find(n => n.code === 'BIOENGR 177C');
-  assert.ok(planned(b).includes('BIOENGR 177C')); assert.ok(!b.nodes.some(n => /BIOENGR 177[AB]/.test(n.code)));
-  assert.equal(TREE_LAYOUT.cardOf(nd, b.pathChoices), 'PATH: ' + cap.key);
-  const { nodes } = TREE_LAYOUT.layers(b.nodes, b.edges, b.pathChoices);
-  assert.ok(!nodes.some(n => n.code === 'BIOENGR 177C')); assert.equal(capNode(b).length, 1);
+const L = mm => TREE_LAYOUT.layers(mm.nodes, mm.edges, mm.pathChoices);
+const real = (mm, c) => mm.nodes.find(n => n.code === c && ['ready', 'locked'].includes(n.status));
+const hasEdge = (mm, from, to) => mm.edges.some(e => e.from === from && e.to === to);
+t('choosing path 2: no capstone card; 177C is a normal node tagged fromPath; 177A/B absent', () => {
+  const b = pick(1), nd = real(b, 'BIOENGR 177C');
+  assert.ok(planned(b).includes('BIOENGR 177C')); assert.ok(nd && nd.planned); assert.equal(nd.fromPath, cap.key);
+  assert.ok(!b.nodes.some(n => /BIOENGR 177[AB]/.test(n.code))); assert.equal(capNode(b).length, 0);
+  assert.equal(TREE_LAYOUT.cardOf(nd, b.pathChoices), null);
+  assert.ok(L(b).nodes.some(n => n.code === 'BIOENGR 177C'));
   assert.ok(!planned(b).some(c => c.startsWith('CHOOSE: BIOENGINEERING CAPSTONE')));
+});
+t('choosing path 1: no capstone card; 177A/177B are normal nodes with real prereq edges, layered in order', () => {
+  const a = pick(0);
+  assert.equal(capNode(a).length, 0); assert.ok(!a.nodes.some(n => n.status === 'path' && n.pathChoiceKey === cap.key));
+  for (const c of ['BIOENGR 177A', 'BIOENGR 177B']) { assert.ok(real(a, c), c); assert.equal(real(a, c).fromPath, cap.key); assert.ok(!real(a, c).pathPrereq); }
+  for (const [f, to] of [['BIOENGR 177A', 'BIOENGR 177B'], ['BIOENGR 167L', 'BIOENGR 177A'], ['BIOENGR 176', 'BIOENGR 177A']]) assert.ok(hasEdge(a, f, to), f + ' -> ' + to);
+  const { layer, nodes, edges } = L(a);
+  assert.ok(layer['BIOENGR 177A'] > layer['BIOENGR 167L'] && layer['BIOENGR 177A'] > layer['BIOENGR 176']);
+  assert.ok(layer['BIOENGR 177B'] > layer['BIOENGR 177A']);
+  assert.equal(layer['BIOENGR 177A'], Math.max(layer['BIOENGR 167L'], layer['BIOENGR 176']) + 1);
+  assert.ok(nodes.some(n => n.code === 'BIOENGR 177A') && nodes.some(n => n.code === 'BIOENGR 177B'));
+  assert.ok(edges.some(e => e.from === 'BIOENGR 177A' && e.to === 'BIOENGR 177B'), 'internal 177A -> 177B is drawn');
+});
+t('clearing the capstone choice brings back exactly one path node, sitting as late as the slowest path', () => {
+  const u = MODEL.build(p2, { perQuarter: 4, choices: {} });
+  assert.equal(capNode(u).length, 1);
+  assert.ok(!u.nodes.some(n => n.fromPath));
+  const lay = L(u).layer;
+  assert.equal(lay['PATH: ' + cap.key], Math.max(lay['BIOENGR 167L'], lay['BIOENGR 176']) + 2); // one right of where 177A would sit
 });
 t('choosing path 1 plans 177A before 177B and drops 177C and the slot', () => {
   const a = pick(0);
@@ -219,14 +241,6 @@ t('choosing path 1 plans 177A before 177B and drops 177C and the slot', () => {
   assert.ok(!a.nodes.some(n => n.code === 'BIOENGR 177C'));
   assert.ok(!planned(a).some(c => c.startsWith('CHOOSE: BIOENGINEERING CAPSTONE')));
   assert.deepEqual(a.pathChoices.find(pc => pc.key === cap.key).chosenPaths, [cap.paths[0].groupKey]);
-});
-t('tree layout: the capstone card sits late while undecided, at column 0 for 177C, late again for 177A + 177B', () => {
-  const L = mm => TREE_LAYOUT.layers(mm.nodes, mm.edges, mm.pathChoices).layer;
-  const k = 'PATH: ' + cap.key, u = L(m2), c = L(pick(1)), ab = L(pick(0));
-  assert.ok(u[k] > 0); assert.equal(u[k], Math.max(u['BIOENGR 167L'], u['BIOENGR 176']) + 2); // one right of where 177A would sit
-  assert.equal(c[k], 0);
-  assert.ok(ab[k] > 0); assert.equal(ab[k], u[k]);
-  assert.ok(!TREE_LAYOUT.layers(pick(0).nodes, pick(0).edges, pick(0).pathChoices).edges.some(e => /177/.test(e.from)), 'internal 177A -> 177B is not an edge');
 });
 t('a prereq only an undecided path needs is added as a node but not planned', () => {
   const o = c => ({ dept: c.split(' ')[0], num: c.split(' ')[1], alts: [c] });
@@ -252,5 +266,7 @@ t('sample 1: the two ENGINEERING ETHICS groups are one path choice: a list of it
   assert.ok(mm.groups.find(g => g.key === list.groupKey).selected);
   assert.ok(!mm.nodes.some(n => n.code === 'ENGR 2'));
   assert.ok(planned(mm).includes('CHOOSE: ENGINEERING ETHICS'));
+  assert.ok(!mm.nodes.some(n => n.code === 'PATH: ' + pc.key));
+  assert.equal(mm.nodes.find(n => n.code === 'CHOOSE: ENGINEERING ETHICS').fromPath, pc.key);
 });
 console.log(n + ' passed');

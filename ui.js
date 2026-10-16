@@ -1,12 +1,13 @@
 // DARS Skill Tree UI. Plain browser script: reads window.DARS / COURSES / MODEL (see INTERFACE.md), renders into index.html.
 
-// Tree layering (pure, also loaded by the Node tests). A path choice is one card (node `PATH: <key>`); the nodes of the
-// paths it represents fold into it. Layer = longest prereq chain; a card sits where the last course of its relevant
-// paths would sit (undecided: the slowest path; decided: the taken one).
+// Tree layering (pure, also loaded by the Node tests). An undecided path choice is one card (node `PATH: <key>`); nodes of
+// its paths (a path already taken while more picks are pending) fold into it. Layer = longest prereq chain; a card sits
+// where the last course of its slowest path would sit. Once decided there is no card: the taken paths' courses are
+// ordinary nodes, layered like any other.
 (function (g) {
   const cardOf = (n, pcs) => {
     if (!n.groupKey || n.status === 'path') return null;
-    const pc = pcs.find(pc => pc.paths.some(p => n.groupKey === p.groupKey || n.groupKey.startsWith(p.groupKey + '|')));
+    const pc = pcs.find(pc => pc.chosenPaths.length < pc.pick && pc.paths.some(p => n.groupKey === p.groupKey || n.groupKey.startsWith(p.groupKey + '|')));
     return pc ? 'PATH: ' + pc.key : null;
   };
   function layers(nodes, edges, pcs) {
@@ -25,7 +26,7 @@
       visiting.add(c);
       const pc = card[c];
       const v = !pc ? (preds[c].length ? 1 + Math.max(...preds[c].map(L)) : 0)
-        : Math.max(0, ...pc.paths.filter(p => pc.chosenPaths.length < pc.pick || pc.chosenPaths.includes(p.groupKey)).map(p => {
+        : Math.max(0, ...pc.paths.map(p => {
           const cl = {};
           for (const x of p.chain || []) cl[x.code] = Math.max(0, ...x.pre.map(f).filter(q => q in preds && q !== c).map(q => L(q) + 1), ...x.after.map(q => (cl[q] || 0) + 1));
           return Math.max(0, ...Object.values(cl));
@@ -51,7 +52,7 @@
   };
   if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-  const NW = 200, NH = 56, COLW = 340, ROWH = 110, PAD = 40, CW = 240, CHIPW = 108, MAXCHIPS = 8, PW = 300, PROW = 46;
+  const NW = 200, NH = 56, COLW = 340, ROWH = 110, PAD = 40, CW = 240, CHIPW = 108, MAXCHIPS = 8, PW = 300, PROW = 46, TAGH = 22;
   const STATUS = { done: 'Completed', ip: 'In progress', ready: 'Ready now', locked: 'Locked', placeholder: 'GE / elective slot', path: 'Pick one' };
   const QTR = { F: 'Fall', W: 'Winter', S: 'Spring' };
   const PIN_D = 'M10 1l5 5-2 1-3 3 .5 3.5L9 15l-3-3-4 4-1-1 4-4-3-3 1.5-1.5L7 6l3-3z';
@@ -125,6 +126,11 @@
   const pcByKey = k => pcs().find(pc => pc.key === k);
   const pcOfGroup = gk => pcs().find(pc => pc.paths.some(p => p.groupKey === gk));
   const pathDecided = pc => pc.chosenPaths.length >= pc.pick;
+  const inPath = (gk, k) => gk === k || gk.startsWith(k + '|');
+  // decided path choice whose taken path holds this group, and that path (its courses are ordinary tree nodes)
+  const takenPathOf = gk => { const pc = gk && pcs().find(pc => pathDecided(pc) && pc.chosenPaths.some(k => inPath(gk, k)));
+    return pc ? { pc, p: pc.paths.find(p => pc.chosenPaths.includes(p.groupKey) && inPath(gk, p.groupKey)) } : null; };
+  const partOf = tp => `<p class="small">Part of your chosen path: ${esc(tp.pc.title)} (${esc(pathLine(tp.p))}) <button class="btn sm" data-change="${esc(tp.pc.key)}">Change path</button></p>`;
   // a path's courses in prereq order: "BIOENGR 177A → 177B" (→ when it follows the previous one, else +); a list path: its summary
   const dept = c => (DARS.splitCode(c) || {}).dept;
   const chainText = (p, label) => (p.chain || []).map((x, i, a) => (i ? (x.after.length ? ' → ' : ' + ') : '') + label(x.code, i ? a[i - 1].code : null)).join('');
@@ -262,7 +268,7 @@
   // Choice nodes go under the column of their most advanced option; GE slots and GE path cards get a lane at the bottom.
   function layout(all, edges, cgroups, lane, pchoices, gecards) {
     const { layer, nodes, edges: te, preds } = TREE_LAYOUT.layers(all, edges, pchoices);
-    const boxW = n => n.status === 'path' ? PW : NW, boxH = n => n.status === 'path' ? pathHeight(pcByKey(n.pathChoiceKey)) : NH;
+    const boxW = n => n.status === 'path' ? PW : NW, boxH = n => n.status === 'path' ? pathHeight(pcByKey(n.pathChoiceKey)) : n.fromPath ? NH + TAGH : NH;
     const cols = [];
     nodes.forEach(n => (cols[layer[n.code]] = cols[layer[n.code]] || []).push(n));
     const row = {}, pos = {}, colY = [];
@@ -295,10 +301,10 @@
     let laneY = null;
     if (lane.length || gecards.length) {
       laneY = h + 20;
-      const perRow = Math.max(3, Math.floor((maxX - PAD + 24) / (NW + 24)));
-      lane.forEach((n, i) => { pos[n.code] = { x: PAD + (i % perRow) * (NW + 24), y: laneY + 20 + Math.floor(i / perRow) * (NH + 20), w: NW, h: NH }; });
+      const perRow = Math.max(3, Math.floor((maxX - PAD + 24) / (NW + 24))), LH = Math.max(NH, ...lane.map(boxH));
+      lane.forEach((n, i) => { pos[n.code] = { x: PAD + (i % perRow) * (NW + 24), y: laneY + 20 + Math.floor(i / perRow) * (LH + 20), w: NW, h: boxH(n) }; });
       maxX = Math.max(maxX, PAD + Math.min(lane.length, perRow) * (NW + 24) - 24);
-      h = laneY + 20 + Math.ceil(lane.length / perRow) * (NH + 20);
+      h = laneY + 20 + Math.ceil(lane.length / perRow) * (LH + 20);
       // GE path cards: a row under the GE slots, wrapping at the tree width
       let x = PAD, rh = 0;
       for (const pc of gecards) {
@@ -312,7 +318,10 @@
   }
 
   const choiceRows = g => Math.ceil(Math.min(choiceOpts(g).length, MAXCHIPS + 1) / 2);
-  const choiceHeight = g => 32 + choiceRows(g) * 24 + 6;
+  const choiceHeight = g => 32 + choiceRows(g) * 24 + 6 + (takenPathOf(g.key) ? TAGH : 0);
+  // "path · TITLE  ⇄" inside a box that came from a taken path; ⇄ clears the path choice (the card comes back)
+  const pathTag = (pc, w, h) => `<rect class="ptag" x="8" y="${h - 24}" width="${w - 16}" height="18" rx="9"/><text class="ptagt" x="16" y="${h - 11}">path · ${esc(trunc(pc.title, Math.floor((w - 70) / 6) - 7))}</text>
+    <g class="pbtn" data-change="${esc(pc.key)}" transform="translate(${w - 38},${h - 24})" tabindex="0" role="button" aria-label="${esc('Change path for ' + pc.title)}"><title>${esc('Change path for ' + pc.title)}</title><rect width="30" height="18" rx="9"/><text x="15" y="13" text-anchor="middle">⇄</text></g>`;
   function choiceSvg(g, p) {
     const opts = choiceOpts(g), shown = opts.length > MAXCHIPS + 1 ? opts.slice(0, MAXCHIPS) : opts, more = opts.length - shown.length;
     const top = 32;
@@ -324,15 +333,13 @@
     return `<g class="cnode${S.detail === 'g:' + g.key ? ' sel' : ''}" data-group="${esc(g.key)}" transform="translate(${p.x},${p.y})" tabindex="0" role="button" aria-label="${esc(pickLabel(g) + ', ' + g.name)}">
       <title>${esc(pickLabel(g) + ' · ' + g.name)}</title><rect class="box" width="${CW}" height="${p.h}" rx="10"/>
       <text class="ch" x="10" y="20">${esc(trunc(pickLabel(g) + ' · ' + g.name, 34))}</text>
-      ${chips}</g>`;
+      ${chips}${takenPathOf(g.key) ? pathTag(takenPathOf(g.key).pc, CW, p.h) : ''}</g>`;
   }
 
-  // path card: header "Pick 1 of 2 · TITLE", one row per path with a Pick button. Once picked, the chosen row lists its
-  // courses with their planned quarters; the others collapse to one muted line with "switch".
-  const POFF = 26;
-  const pathHeight = pc => 32 + pc.paths.reduce((h, p) => h + (!pathDecided(pc) || pc.chosenPaths.includes(p.groupKey) ? PROW : POFF), 0);
+  // path card (only while undecided): header "Pick 1 of 2 · TITLE", one row per path with a Pick button. With pick k > 1, a
+  // path already taken lists its courses with their planned quarters and "change".
+  const pathHeight = pc => 32 + pc.paths.length * PROW;
   function pathSvg(pc, pos, nm) {
-    const done = pathDecided(pc);
     const btn = (y, attrs, label, w) => `<g class="pbtn" ${attrs} transform="translate(${PW - w - 12},${y})" tabindex="0" role="button"><rect width="${w}" height="18" rx="9"/><text x="${w / 2}" y="13" text-anchor="middle">${esc(label)}</text></g>`;
     const take = (p, y, label) => btn(y, `data-take="${esc(p.groupKey)}" data-pc="${esc(pc.key)}" aria-label="${esc(label + ': ' + pathLine(p))}"`, label, label.length * 6.5 + 18);
     const line = p => `${pathLine(p)} · ${p.units} u`;
@@ -347,7 +354,6 @@
     let y = 32;
     const rows = pc.paths.map(p => {
       const on = pc.chosenPaths.includes(p.groupKey), y0 = y;
-      if (done && !on) { y += POFF; return `<rect class="prow off" x="8" y="${y0}" width="${PW - 16}" height="${POFF - 4}" rx="6"/><text class="poff" x="16" y="${y0 + 15}">${esc(trunc(line(p), 36))}</text>${take(p, y0 + 2, 'switch')}`; }
       y += PROW;
       const head = `<rect class="prow${on ? ' on' : ''}" x="8" y="${y0}" width="${PW - 16}" height="${PROW - 6}" rx="6"/>
         <circle class="dot${p.ready ? ' ok' : ''}" cx="20" cy="${y0 + 14}" r="4"><title>${esc(pathNeeds(p))}</title></circle>
@@ -356,7 +362,7 @@
         : `<text class="csub" x="30" y="${y0 + 34}">${esc(pathNeeds(p))}</text>` + take(p, y0 + 11, 'Pick'));
     }).join('');
     const head = `${pickHead(pc)} · ${pc.title}`;
-    return `<g class="pnode${done ? ' done' : ''}${S.detail === 'p:' + pc.key ? ' sel' : ''}" data-path="${esc(pc.key)}" transform="translate(${pos.x},${pos.y})" tabindex="0" role="button" aria-label="${esc(head)}">
+    return `<g class="pnode${S.detail === 'p:' + pc.key ? ' sel' : ''}" data-path="${esc(pc.key)}" transform="translate(${pos.x},${pos.y})" tabindex="0" role="button" aria-label="${esc(head)}">
       <title>${esc(head + '\n' + pc.paths.map(p => line(p)).join('\n'))}</title>
       <rect class="box" width="${PW}" height="${pos.h}" rx="10"/><text class="ch" x="10" y="20">${esc(trunc(head, 44))}</text>${rows}</g>`;
   }
@@ -367,26 +373,27 @@
     // path cards stand for their paths' courses and slots; CHOOSE: slots of major requirements are drawn as choice nodes;
     // GE slots and GE path cards go to the lane
     const folded = n => !!TREE_LAYOUT.cardOf(n, pcs()), pcOf = n => n.status === 'path' && pcByKey(n.pathChoiceKey);
-    const gecards = pcs().filter(isGEpc), pchoices = pcs().filter(pc => !isGEpc(pc));
+    const gecards = pcs().filter(pc => isGEpc(pc) && !pathDecided(pc)), pchoices = pcs().filter(pc => !isGEpc(pc));
     const lane = all.filter(n => isGE(n) && !folded(n));
     const tree = all.filter(n => !isGE(n) && !n.code.startsWith('CHOOSE: ') && !(pcOf(n) && isGEpc(pcOf(n))));
     const cgroups = S.model.groups.filter(g => g.undecided && !g.placeholder && g.selected !== false && !folded({ groupKey: g.key }));
     const { pos, cpos, laneY, w, h, nodes, edges: te } = layout(tree, edges, cgroups, lane, pchoices, gecards);
     const blocked = e => nm[e.to].status === 'locked' && !['done', 'ip'].includes(nm[e.from].status);
-    const yAt = p => p.y + (p.h > NH ? 16 : NH / 2); // cards connect at their header
+    const yAt = p => p.y + (p.w === PW ? 16 : NH / 2); // cards connect at their header
     const es = te.filter(e => !isGE(nm[e.from]) && !isGE(nm[e.to])).sort((a, b) => blocked(a) - blocked(b)).map(e => {
       const a = pos[e.from], b = pos[e.to], x1 = a.x + a.w, y1 = yAt(a), x2 = b.x, y2 = yAt(b), dx = Math.max(40, (x2 - x1) / 2);
       return `<path class="edge${blocked(e) ? ' block' : ''}" d="M${x1} ${y1} C${x1 + dx} ${y1} ${x2 - dx} ${y2} ${x2} ${y2}"/>`;
     }).join('');
     const ns = nodes.filter(n => n.status !== 'path').concat(lane).map(n => {
       const p = pos[n.code], chip = n.planned || n.term || '', ready = n.status === 'ready', pinned = n.groupKey && isPinned(n.groupKey, n.code);
-      const cw = chip ? chip.length * 6.2 + 12 : 0, label = n.code.startsWith('CHOOSE: ') ? 'choose: ' + n.title : n.code;
+      const cw = chip ? chip.length * 6.2 + 12 : 0, label = n.code.startsWith('CHOOSE: ') ? 'choose: ' + n.title : n.code, fp = n.fromPath && pcByKey(n.fromPath);
       return `<g class="node s-${esc(n.status)}${S.detail === n.code ? ' sel' : ''}" data-node="${esc(n.code)}" transform="translate(${p.x},${p.y})" tabindex="0" role="button" aria-label="${esc(n.code + ', ' + (STATUS[n.status] || n.status) + (pinned ? ', pinned' : ''))}">
-        <title>${esc(n.code + ' — ' + n.title)}</title><rect class="box" width="${NW}" height="${NH}" rx="8"/>
+        <title>${esc(n.code + ' — ' + n.title)}</title><rect class="box" width="${NW}" height="${p.h}" rx="8"/>
         ${pinned ? `<path class="pinp" transform="translate(8,10) scale(.8)" d="${PIN_D}"/>` : ''}
         <text class="code" x="${pinned ? 24 : 10}" y="22">${esc(trunc(label, Math.floor((NW - cw - (pinned ? 32 : 18)) / 7.8)))}</text>
         <text class="ttl" x="10" y="42">${esc(trunc(n.title, ready ? 20 : n.status === "placeholder" ? 27 : 31))}</text>${ready ? `<text class="rdy" x="${NW - 10}" y="42" text-anchor="end">ready now</text>` : ''}
         ${chip ? `<rect class="chip" x="${NW - cw - 8}" y="9" width="${cw}" height="17" rx="8.5"/><text class="chipt" x="${NW - 8 - cw / 2}" y="21" text-anchor="middle">${esc(chip)}</text>` : ''}
+        ${fp ? pathTag(fp, NW, p.h) : ''}
       </g>`;
     }).join('');
     const cs = cgroups.map(g => choiceSvg(g, cpos[g.key])).join('') + pcs().filter(pc => pos['PATH: ' + pc.key]).map(pc => pathSvg(pc, pos['PATH: ' + pc.key], nm)).join('');
@@ -430,6 +437,7 @@
     }).join('');
     return `<button class="close" data-close aria-label="Close">×</button>
       <h2>${esc(pickLabel(g))}</h2><p>${esc(g.name)}<br><small class="muted">${esc(g.section)}</small></p>
+      ${takenPathOf(g.key) ? partOf(takenPathOf(g.key)) : ''}
       ${g.selected === false && pcOfGroup(g.key) ? `<p class="small">One path of ${esc(pcOfGroup(g.key).title)}. Pinning an option here takes this path. <a href="#" data-path="${esc(pcOfGroup(g.key).key)}">Compare paths</a></p>` : ''}
       <p class="small muted">Green dot: prerequisites done, in progress or pinned. Grey: something is still missing.</p>${rows}`;
   }
@@ -464,6 +472,7 @@
     const pre = preHtml(n.prereqs, nm);
     d.innerHTML = `<button class="close" data-close aria-label="Close">×</button>
       <h2>${pinned ? PIN + ' ' : ''}${esc(n.code)}</h2><p>${esc(n.title)}</p>
+      ${n.fromPath && takenPathOf(n.groupKey) ? partOf(takenPathOf(n.groupKey)) : ''}
       ${pinned ? `<p><button class="btn sm" data-act="unpin" data-key="${esc(g.key)}" data-code="${esc(n.code)}">Unpin</button></p>` : ''}
       <dl><dt>Status</dt><dd><i class="badge s-${esc(n.status)}">${esc(STATUS[n.status] || n.status)}</i></dd>
       <dt>Units</dt><dd>${esc(n.units)}</dd>

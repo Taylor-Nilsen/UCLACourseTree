@@ -211,17 +211,20 @@
       if (!nodes.has(m)) { add(m, {}); stack.push(m); }
     } };
     pull([...nodes.keys()].filter(c => !taken[c]));
-    // one PATH node per path choice; its prereqs = prereqs of the relevant paths' courses from outside the path
-    // (undecided: every path; decided: the taken ones). Prereqs only an undecided path needs are added but not planned.
-    const open = pc => pc.chosenPaths.length < pc.pick, relevant = pc => pc.paths.filter(p => open(pc) || pc.chosenPaths.includes(p.groupKey));
+    // undecided path choice: one PATH node; its prereqs = prereqs of every path's courses from outside the path.
+    // Prereqs only an undecided path needs are added but not planned. Decided: no PATH node; the taken paths' courses
+    // and slots are ordinary nodes tagged fromPath.
+    const open = pc => pc.chosenPaths.length < pc.pick;
+    for (const pc of pathChoices) if (!open(pc)) for (const n of nodes.values())
+      if (n.groupKey && !n.pathChoiceKey && pc.chosenPaths.some(k => n.groupKey === k || n.groupKey.startsWith(k + '|'))) n.fromPath = pc.key;
     const before = new Set(nodes.keys());
-    for (const pc of pathChoices) {
+    for (const pc of pathChoices.filter(open)) {
       const pre = new Map();
-      for (const p of relevant(pc)) for (const c of p.courses) for (const grp of (COURSES[c] || { pre: [] }).pre)
+      for (const p of pc.paths) for (const c of p.courses) for (const grp of (COURSES[c] || { pre: [] }).pre)
         if (!grp.some(x => p.courses.includes(x))) pre.set(grp.join('|'), grp);
       add('PATH: ' + pc.key, { title: pc.title, units: Math.min(...pc.paths.map(p => p.units)), offered: '', status: 'path', pathChoiceKey: pc.key, prereqs: [...pre.values()] });
     }
-    pull(pathChoices.map(pc => 'PATH: ' + pc.key));
+    pull(pathChoices.filter(open).map(pc => 'PATH: ' + pc.key));
     for (const n of nodes.values()) if (!before.has(n.code) && n.status !== 'path') n.pathPrereq = true;
     for (const n of nodes.values()) if (!n.status) n.status = n.prereqs.every(grp => grp.some(x => taken[x])) ? 'ready' : 'locked';
     const edges = [];
