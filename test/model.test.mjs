@@ -117,4 +117,24 @@ t('stats', () => {
   assert.equal(m.stats.coursesRemaining, m.plan.reduce((s, p) => s + p.courses.length, 0));
   assert.equal(m.stats.plannedUnits, m.plan.reduce((s, p) => s + p.units, 0));
 });
+
+// ---- grade status and wildcard / range expansion (synthetic fixtures in test/fixtures)
+const fx = name => DARS.parse(JSON.parse(readFileSync(new URL('./fixtures/' + name + '.json', import.meta.url), 'utf8')));
+t('only passing grades count as done; failed / withdrawn / incomplete courses are still to take', () => {
+  const mm = MODEL.build(fx('failed-withdrawn-repeats'), {}), nd = c => mm.nodes.find(x => x.code === c);
+  assert.equal(nd('MATH 32A').status, 'done'); assert.equal(nd('MATH 32B').status, 'ip');
+  for (const c of ['MATH 33A', 'MATH 115A', 'PHYSICS 1A']) { assert.notEqual(nd(c).status, 'done', c); assert.ok(nd(c).planned, c + ' planned'); }
+  assert.ok(!mm.nodes.some(x => x.code === 'MATH 95' && x.status === 'done'));
+  assert.equal(mm.stats.unitsEarned, 4 + 4 + 4 + 4 + 8); // 31A, 31B, 32A (B+ retake), 33B, ENGCOMP 3 (AP)
+});
+t('wildcards expand against COURSES and NOT FROM (codes and ranges) is honored', () => {
+  const cs = MODEL.build(fx('eng-computer-science'), {}).groups.find(g => g.name === 'FIVE COMPUTER SCIENCE ELECTIVES');
+  assert.ok(cs.options.length > 20 && cs.options.every(c => /^COM SCI (CM|M|C)?1\d\d[A-Z]*$/.test(c)), cs.options.join());
+  const alts = cs.alternatives.map(a => a.code).concat(cs.chosen.map(c => c.code));
+  assert.ok(!alts.includes('COM SCI 188') && !alts.includes('COM SCI 199'));
+  const h = MODEL.build(fx('hostile-psychology'), {}).groups.find(g => g.name === 'FOUR UPPER DIVISION ELECTIVES');
+  assert.ok(h.options.includes('PSYCH 110') && h.options.some(c => /^LING /.test(c)));
+  assert.ok(!h.options.some(c => /^PSYCH 19[2-9]/.test(c)), 'PSYCH 192-199 excluded');
+  assert.ok(!cs.options.includes('COM SCI 188'));
+});
 console.log(n + ' passed');

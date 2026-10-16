@@ -25,7 +25,7 @@
       let s = '', end = null, x0 = r.items[0].x;
       for (const it of r.items) {
         if (end !== null && it.x - end > 0.22 * it.h) {
-          if (STATUS_ONLY.test(s.trim()) && it.x - end > 2 * it.h) { out.push({ x: Math.round(x0), line: s.trim() }); s = ''; x0 = it.x; }
+          if ((STATUS_ONLY.test(s.trim()) || /^[^\w\s]{1,3}$/.test(s.trim())) && it.x - end > 2 * it.h) { out.push({ x: Math.round(x0), line: s.trim() }); s = ''; x0 = it.x; }
           else s += ' ';
         }
         s += it.str; end = it.x + it.w;
@@ -48,8 +48,9 @@
     if (/^(IP|IPPF|PL|PLN|PLAN|PLANNED|RG|RGPF|PG|PGPF|REG|\*+)$/.test(g)) return 'ip';
     if (/^(W|WD|WF|WP|WU|WX|WN|DROP)$/.test(g)) return 'withdrawn';
     if (/^(I|IN|INC|IF|NR|DR|DE|X|Z)$/.test(g)) return 'incomplete';
+    if (/^(AP|IB|TE|EX|GCE|TR|T|CRE|CL|DS|EXM)$/.test(g)) return 'done'; // exam / test / transfer credit
     if (/^[TU]?(F|NP|NC|NCR|NOCR|E|U|FAIL)$/.test(g)) return 'failed';
-    if (/^[TU]?([A-D][+-]?|P|S|CR|PASS)$/.test(g) || /^(AP|IB|TE|EX|GCE|TR|T|CRE|CL|DS|EXM)$/.test(g)) return 'done';
+    if (/^[TU]?([A-D][+-]?|P|S|CR|PASS)$/.test(g)) return 'done';
     return 'unknown';
   }
   const RANK = { done: 5, ip: 4, incomplete: 3, unknown: 2, withdrawn: 1, failed: 0 };
@@ -83,7 +84,7 @@
       out.push(isWild ? { dept, num, wildcard: num, alts: [] } : { dept, num, alts: [dept + ' ' + num] });
     }
     const tail = text.slice(last).replace(/[,;]/g, ' ').trim();
-    if (tail && !DEPT.test(tail)) bad.push(tail);
+    if (tail) bad.push(tail);
     return out;
   }
 
@@ -144,13 +145,13 @@
       if ((m = COURSE_LINE.exec(line))) {
         dars++;
         const cm = m, sc = splitCode(cm[3]);
-        if (!sc) { if (!/^[A-Z]+$/.test(m[3])) unparsed(line, 'course code not recognized'); continue; } // NONTRNS / NONCRDT rows have no course
-        let grade = m[5], title = m[6], flags = [];
+        if (!sc) { if (!/^[A-Z]+$/.test(cm[3])) unparsed(line, 'course code not recognized'); continue; } // NONTRNS / NONCRDT rows have no course
+        let grade = cm[5], title = cm[6], flags = [];
         if (grade.includes('>')) { flags.push(grade.slice(grade.indexOf('>'))); grade = grade.slice(0, grade.indexOf('>')); }
         while ((m = /^(>\S*|\(R\)|RP|\*+)\s*/.exec(title)) && m[0]) { flags.push(m[1]); title = title.slice(m[0].length); }
         const code = sc.dept + ' ' + sc.num, status = gradeStatus(grade);
         addTaken(code, Object.assign({ term: cm[1] + cm[2], units: +cm[4], grade, status, title }, flags.length ? { flags } : {}));
-        lastTaken = code;
+        lastTaken = code; lastHeaderWasTop = false;
         if (group && mode !== 'select' && (status === 'done' || status === 'ip') && !group.taken.includes(code)) group.taken.push(code);
         continue;
       }
@@ -159,7 +160,7 @@
       if (/^(FA|WI|SP|SU)\d\d\s/.test(line)) { unparsed(line, 'course line not recognized'); continue; }
       if ((m = /^ALTERNATE CRS:\s*(.+)$/.exec(line))) { const sc = splitCode(m[1]); if (sc && lastTaken) addTaken(sc.dept + ' ' + sc.num, Object.assign({}, res.taken[lastTaken], { via: lastTaken })); continue; }
       if ((m = /^NEEDS:\s*(.*)$/i.exec(line))) {
-        dars++;
+        dars++; lastHeaderWasTop = false;
         const s = m[1].toUpperCase(), sg = /(\d+) SUB-?GROUPS?/.exec(s), c = /(\d+) COURSES?/.exec(s), u = /([\d.]+) (?:UNITS?|HOURS?|CREDITS?)/.exec(s);
         if (sg) { if (section) section.needSubgroups = +sg[1]; continue; }
         if (section && /^UNIT CHECK/.test(section.title) && u) { res.unitsNeeded = +u[1]; continue; }
@@ -177,11 +178,12 @@
       const caps = !/[a-z]/.test(line) && /[A-Z]{3}/.test(line);
       if (!section && /,[^,]*\/\s*\S*\s*$/.test(line)) continue; // "SCHOOL ... - LAST, FIRST / ID" header line
       // a section title the browser repeats at the top of the next page: skip it, keep reading the list it interrupted
-      if (section && caps && (afterBreak || /\(?CONT(INUED|'D)?\)?$/.test(line)) && line.replace(/\s*\(?CONT(INUED|'D)?\)?$/, '') === section.title) { afterBreak = false; continue; }
+      if (section && caps && x < dataX - 10 && (afterBreak || /\(?CONT(INUED|'D)?\)?$/.test(line)) && line.replace(/\s*\(?CONT(INUED|'D)?\)?$/, '') === section.title) { afterBreak = false; continue; }
       afterBreak = false;
       // list continuation: indented past the data column, or a digit-bearing line that is not a group title (a title is followed by NEEDS/courses)
-      if ((mode === 'select' || mode === 'not') && group && (x > dataX + 10 || (/\d/.test(line) && !(x <= dataX + 2 && (REQ_LINE.test(next(i)) || isSummary(next(i)))))) && !/^[A-Z][A-Z &-]+$/.test(line)) { group[mode === 'select' ? '_sel' : '_not'] += ' ' + line; continue; }
+      if ((mode === 'select' || mode === 'not') && group && (x > dataX + 10 || (/\d/.test(line) && x >= dataX - 10 && !(x <= dataX + 6 && (REQ_LINE.test(next(i)) || isSummary(next(i)))))) && !/^[A-Z][A-Z &-]+$/.test(line)) { group[mode === 'select' ? '_sel' : '_not'] += ' ' + line; continue; }
       mode = null;
+      if (/^[^A-Za-z0-9\s]{1,3}$/.test(line)) { unparsed(line, 'unknown status marker'); continue; }
       if (isSummary(line) || /^[^A-Za-z0-9]*$/.test(line)) continue;
       if (x > dataX + 150) continue; // right-hand annotation column (AP TEST:, transfer school, grade changes)
       if (!caps) { if (section && !/[a-z]/.test(line) && /[A-Z0-9]/.test(line) && line.length > 2) unparsed(line); lastHeaderWasTop = false; continue; } // prose is fine; caps junk is not
@@ -193,16 +195,19 @@
           else section.note = section.note ? section.note + ' ' + line : line;
           continue;
         }
-        section = { title: line, program, groups: [], needSubgroups: null }; res.sections.push(section); group = null; lastHeaderWasTop = true; continue;
+        section = { title: line, program, groups: [], needSubgroups: null }; res.sections.push(section); group = null; lastHeaderWasTop = !p; continue;
       }
       lastHeaderWasTop = false;
-      if ((level === 'group' || x <= dataX + 2) && section && !/^(IN-PROG|GRADED|EARNED)/.test(line)) { const note = /GRADE REQUIRED|\.$/.test(line); newGroup(note ? section.title : line, note ? { note: line } : {}); }
+      if ((level === 'group' || x <= dataX + 6) && section && !/^(IN-PROG|GRADED|EARNED)/.test(line)) { const note = /GRADE REQUIRED|\.$/.test(line);
+        if (note && group && !group.note && group.needCourses === undefined && !group._sel && !group.taken.length) group.note = line; // note under a group title
+        else newGroup(note ? section.title : line, note ? { note: line } : {}); }
     }
     for (const s of res.sections) for (const gr of s.groups) {
       if (/TECHNICAL BREADTH/.test(s.title) && gr.needCourses && !gr._sel && !gr.taken.length) gr.undeclared = true;
       const info = { bad: [], attrs: [] };
       if (gr._sel) gr.options = parseOptions(gr._sel, res.currentTerm, info);
-      if (gr._not) gr.notFrom = parseOptions(gr._not, res.currentTerm, info).flatMap(o => o.alts.length ? o.alts : [o.dept + ' ' + o.num]);
+      if (gr._not) { const n = parseOptions(gr._not, res.currentTerm, info), r = n.filter(o => o.to || o.wildcard);
+        gr.notFrom = n.filter(o => !r.includes(o)).flatMap(o => o.alts); if (r.length) gr.notFromRanges = r; }
       if (info.attrs.length) gr.attributes = info.attrs;
       for (const b of info.bad) res.unparsed.push({ section: s.title, line: b, why: 'not a course code in the list for ' + gr.name });
       delete gr._sel; delete gr._not;

@@ -27,11 +27,21 @@
   function showError(msg) { const e = $('#error'); e.textContent = msg; e.hidden = false; }
   function busy(msg) { $('#busy').textContent = msg || ''; }
 
+  // "Copy diagnostic": redacted lines + what the parser could not read, for a bug report (DARS.redact strips name, ID, grades)
+  const DIAG = '<button type="button" class="diag" data-diag>Copy diagnostic</button>';
+  async function copyDiag(btn) {
+    const { parsed: p, lines } = S.diag || {};
+    const unparsed = ((p && p.unparsed) || []).map(u => Object.assign({}, u, { line: (DARS.redact([{ x: 0, line: u.line }])[0] || {}).line || '[redacted]' }));
+    const txt = JSON.stringify({ app: 'dars-skill-tree', ok: p && p.ok, reason: p && p.reason, unparsed, lines: DARS.redact(lines || []) });
+    try { await navigator.clipboard.writeText(txt); btn.textContent = 'Copied'; }
+    catch (e) { const ta = document.createElement('textarea'); ta.value = txt; ta.readOnly = true; ta.rows = 4; ta.style.width = '100%'; btn.after(ta); ta.select(); btn.textContent = 'Copy the text below'; }
+  }
+
   function load(lines, fresh) {
     $('#error').hidden = true;
-    let parsed;
-    try { parsed = DARS.parse(lines); } catch (e) { console.error(e); return showError('Could not read this audit: ' + e.message); }
-    if (!parsed || !parsed.sections || !parsed.sections.length) return showError('No requirement sections were found. Is this a UCLA DARS degree audit PDF?');
+    const parsed = DARS.parse(lines); // never throws; ok:false carries a reason
+    S.diag = { parsed, lines };
+    if (!parsed.ok) { showError(parsed.reason); $('#error').insertAdjacentHTML('beforeend', ' ' + DIAG); return; }
     if (fresh) { S.opts.choices = {}; S.detail = null; }
     S.parsed = parsed;
     store.set('dars.lines', lines); saveOpts();
@@ -66,7 +76,8 @@
     if (nodes[code]) return nodes[code].status;
     const tk = S.parsed.taken, A = window.ALIAS || {};
     const t = tk[code] || Object.keys(tk).filter(k => A[k] === code).map(k => tk[k])[0];
-    return t ? (t.grade === 'IP' ? 'ip' : 'done') : 'none';
+    const st = t && (t.status || (t.grade === 'IP' ? 'ip' : 'done'));
+    return st === 'done' || st === 'ip' ? st : 'none'; // failed / withdrawn / incomplete attempts do not count
   }
   const titleOf = (code, nodes) => (nodes[code] && nodes[code].title) || ((window.COURSES || {})[code] || {}).t || '';
   const course = c => (window.COURSES || {})[c];
@@ -106,6 +117,13 @@
     const w = m.warnings || [];
     $('#warnings').hidden = !w.length;
     $('#warnings').innerHTML = w.map(x => `<li>${esc(x)}</li>`).join('');
+    const u = S.parsed.unparsed || [];
+    let box = $('#unparsed');
+    if (!box) { box = document.createElement('details'); box.id = 'unparsed'; box.className = 'warnings'; $('#warnings').after(box); }
+    box.hidden = !u.length;
+    box.innerHTML = `<summary>${u.length} audit line${u.length === 1 ? ' was' : 's were'} not understood</summary><ul>` +
+      u.map(x => `<li>${x.section ? `<b>${esc(x.section)}</b>: ` : ''}${esc(x.line)}${x.why ? ` <small>(${esc(x.why)})</small>` : ''}</li>`).join('') +
+      `</ul><p>The plan may be missing something from these lines. Use ${DIAG} and send the result to the maintainer; your name, student ID and grades are removed.</p>`;
   }
 
   function optRow(key, code, why, act, cls, ready) {
@@ -346,8 +364,9 @@
 
   // ---------- events ----------
   document.addEventListener('click', e => {
-    const t = e.target.closest('[data-act],[data-node],[data-group],[data-tab],[data-zoom],[data-sample],[data-close]');
+    const t = e.target.closest('[data-act],[data-node],[data-group],[data-tab],[data-zoom],[data-sample],[data-close],[data-diag]');
     if (!t) return;
+    if (t.dataset.diag !== undefined) return copyDiag(t);
     if (t.dataset.sample !== undefined) {
       if (!Array.isArray(window.SAMPLE_LINES)) return showError('Sample audit (sample/dars-lines.js) did not load.');
       return load(window.SAMPLE_LINES, true);

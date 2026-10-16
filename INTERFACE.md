@@ -8,19 +8,35 @@ already used in parser.js and courses.js.
 - `window.COURSES` (courses.js): `{ [code]: { t, u, pre: string[][], off: 'F'|'W'|'S' combos or '', w2?: true, note?, rec?: number } }`
   `pre` is an AND of OR-groups, e.g. `[['MECH&AE M20','COM SCI 31'], ['MECH&AE 82']]`.
 - `window.ALIAS` (courses.js): `{ 'MATH T03': 'MATH 31B', ... }`
-- `window.DARS.parse(lines)` (parser.js) returns:
+- `window.DARS.parse(lines)` (parser.js). Input: `[{x, line}]` from `DARS.linesFromItems(pdfjsTextItems)`, or plain text.
+  **Never throws.** Returns:
 ```
-{ student: { auditDate, expected: 'SP29', major }, currentTerm: 'FA26', unitsNeeded: 69,
-  taken: { [code]: { term:'WI26', units:4, grade:'B'|'IP'|'AP'|'TA'|'P'..., title, via? } },
-  sections: [ { title, note?: string /* extra header lines */, needSubgroups: number|null,
-      groups: [ { section, name, needCourses, needUnits, taken: string[], notFrom: string[],
+{ ok: boolean, reason?: string /* ok:false only: why there is nothing to plan; show it instead of a blank page */,
+  student: { auditDate, expected: 'SP29', major /* = first MAJOR program's name */, auditStatus?: 'complete',
+             programs: [ { key: 'MAJOR1'|'MAJOR2'|'MINOR1'|..., type: 'major'|'minor'|..., catalogTerm: '2025 FALL', code: 'EN0279', name } ] },
+  currentTerm: 'FA26', unitsNeeded: 69,
+  taken: { [code]: { term:'WI26', units:4, grade:'B+'|'IP'|'AP'|'TA'|'P'|'F'|'W'..., title, via?, flags?: ['>R'|'>D'|'(R)'|'RP'...],
+                     status: 'done'|'ip'|'failed'|'withdrawn'|'incomplete'|'unknown' } },
+  sections: [ { title, program: 'MAJOR2'|null /* last program header printed above it, if the audit prints one */,
+      note?: string /* extra header lines */, needSubgroups: number|null,
+      groups: [ { section, name, needCourses, needUnits, taken: string[] /* done/ip only */, notFrom: string[],
+                  notFromRanges?: option[] /* "NOT FROM: PSYCH 192 TO 199" */, note?, attributes?: string[] /* "F:W2T" */,
                   orPrev?: true /* "OR)" group: alternative to the previous group in the section */,
                   undeclared?: true /* technical-breadth group with no SELECT FROM: student has not declared a TBA */,
-                  options: [ { dept, num, alts: string[] /* 'MECH&AE 157','MECH&AE 157W' = one slot */, to?: '187' /* range */ } ] } ] } ] }
+                  options: [ { dept, num, alts: string[] /* 'MECH&AE 157','MECH&AE 157W' = one slot */,
+                               to?: '187' /* range num..to */, wildcard?: '1@@' /* '@' = one digit; all-'@' = any course; alts: [] */ } ] } ] } ],
+  unparsed: [ { section, line, why? } ] /* lines inside a requirement section the parser did not understand */ }
 ```
+  Grades: `status` is `done` only for a passing grade (A..D with +/-, P, S, CR, AP/IB/TE/EX test credit, T/U-prefixed transfer
+  grades such as TA, TB+, UA, TP); `ip` for IP/PL/planned/registered; `failed` for F, NP, NC, U, NOCR; `withdrawn` for W, WF, DROP;
+  `incomplete` for I, NR, DR; anything else `unknown`. When a course appears more than once the best attempt is kept
+  (done > ip > incomplete > unknown > withdrawn > failed). Status markers (OK/NO/IP/+/-/R/(R)) and course flags (>R, >D, RP, ...)
+  never appear in names or codes. `DARS.redact(lines)` returns the lines with the name/ID line, 9-digit numbers, school names and
+  letter grades removed (for the "Copy diagnostic" button); `DARS.gradeStatus(grade)` exposes the grade classes.
   Notes: a group whose `options` is empty is a "count check" (use only for warnings). Two groups in the same
   section with the same `name` are alternatives (pick one). `section.needSubgroups = k` means pick k of that
   section's groups. A group with `orPrev: true` is an alternative to the group just before it. GE groups have hundreds of options that are not in COURSES.
+  The model expands ranges and wildcards against COURSES, drops NOT FROM courses from `options`, and counts only `done`/`ip` courses.
 - `DARS.termIndex('WI27')` -> sortable int, `DARS.termName(int)` inverse. Quarter order FA, WI, SP, SU within an academic year.
 
 ## model.js must expose `window.MODEL.build(parsed, opts) -> model`
@@ -74,7 +90,7 @@ Each open slot of a selected choice group is a node `CHOOSE: <group name>[ #i]` 
 `groupKey` of the first undecided alternative group. These, like `GE:` slots, are scheduled last in the plan so
 unit totals stay honest. The UI draws non-GE `CHOOSE:` slots as one choice node per undecided group instead,
 and puts GE groups' nodes in a separate "General Education" lane.
-Node status: done = taken with a non-IP grade; ip = in progress; ready = every prereq AND-group has a done/ip member;
+Node status: done = taken with a passing grade (`status: done`); ip = in progress; failed, withdrawn and incomplete attempts count as not taken; ready = every prereq AND-group has a done/ip member;
 locked = otherwise; placeholder = GE/elective slot or pending choice. Placeholder node codes: `GE: <group name>`,
 `CHOOSE: <group or section name>`.
 

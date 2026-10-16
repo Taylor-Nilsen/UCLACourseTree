@@ -6,8 +6,8 @@ Upload your UCLA DARS degree-audit PDF and get a prerequisite "skill tree" plus 
 
 - Reads your audit: completed courses, courses in progress, what each requirement group still needs, and your expected graduation term.
 - Draws the remaining courses as a tree, with arrows from prerequisites to the courses they unlock.
-- Suggests which courses to take and spreads them over the quarters you have left, respecting prerequisites and when each course is offered.
-- Lets you pin your own choice wherever a requirement offers several courses.
+- Spreads the remaining courses over the quarters you have left, respecting prerequisites and, where known, when each course is offered.
+- Never picks between real options for you. Where a requirement offers more courses than it needs, it shows every option with its prerequisites and you pin your pick.
 
 ## Run it
 
@@ -34,13 +34,15 @@ Tests: `npm test` (needs Node, no dependencies).
 - Locked: at least one prerequisite is still missing.
 - Placeholder: a general education or elective slot with no specific course picked yet.
 
-## How recommendations work
+## How choices work
 
-For each requirement that offers a choice, the app prefers the course with the fewest unmet prerequisites. Courses that are not offered in the quarters you have left are penalized. One course may count toward both the ethics and the writing requirement when the audit allows it. If two courses tie, the one more relevant to aerospace wins. The plan then places courses in the earliest quarter where their prerequisites are met and they are offered.
-
-## Pin alternatives
-
-Each requirement group shows the courses the app chose and the other options. Pick a different course for a group and the tree and plan rebuild around your choice. Pins are not saved between visits.
+- A requirement that needs N courses and lists N or fewer usable options uses all of them automatically. Options that are never offered, excluded by the audit, or already used by another requirement do not count as usable.
+- A requirement that lists more options than it needs becomes a "Pick N of M" box in the tree. Each option shows a green dot when its prerequisites are done or in progress and a grey dot otherwise. Click the box to see every option's prerequisites and quarters offered, then pin the ones you want.
+- Until you pick, the quarter plan holds a "choose" slot for each open course so the timeline stays honest.
+- Alternative requirement groups (for example two capstone options) are all shown, and pinning a course in one selects that group.
+- Ethics and writing are the exception to "one course, one requirement": a required course that appears on the writing list, such as MECH&AE 157W, satisfies writing too.
+- General education and other long lists (over 60 options) stay as searchable slots in their own lane at the bottom of the tree.
+- Pins are saved in your browser.
 
 ## Data sources
 
@@ -52,15 +54,14 @@ Each requirement group shows the courses the app chose and the other options. Pi
 - MAE term offerings: https://seasoasa.ucla.edu/mae-course-term-offerings/
 - Technical breadth area (TBA) list: https://seasoasa.ucla.edu/undergraduates/undergraduate-technical-breadth-area-tba
 
-The course data is in `courses.js`.
+- UCLA General Catalog 2026-27 (all undergraduate courses), see "Course database" below. `courses.js` adds hand-checked quarter offerings and notes for the Aerospace Engineering major on top of it.
 
 ## Limitations
 
-- The course database covers the Aerospace Engineering major only. Courses outside it (including general education) have no prerequisite data.
-- Prerequisites among lower-division courses you have already completed were entered from the standard sequence and not re-verified.
-- Offerings are the 2026-27 MAE schedule. Departments change it, so check the schedule before you enroll.
-- General education options come straight from the audit and have no prerequisite data.
-- The audit's course-count check asks for 7 departmental/TBA courses, while the itemized requirements add up to 6. The app flags this mismatch rather than guessing which is right.
+- Prerequisites come from the catalog's requisite sentences. 291 courses have wording too irregular to parse; their raw catalog text shows in the detail panel instead of tree links.
+- The catalog no longer publishes which quarters a course is offered. Offerings are known only for engineering courses (2025-26 Samueli pages, plus the 2026-27 MAE schedule). Everything else is assumed to be offered every quarter.
+- The parser is tested on two real audits (Aerospace and Bioengineering, both UCLA Samueli) plus 13 synthetic audits covering Letters & Science, Arts, TFT, Music, Nursing, Luskin, Education, minors, double majors, transfer students and failed or withdrawn courses. The synthetic ones are modeled on the engine's documented format, not on real UCLA printouts. If your audit shows "lines were not understood", use "Copy diagnostic" and send it to the maintainer.
+- When an audit's course-count check disagrees with its itemized requirements, the app flags the mismatch rather than guessing which is right.
 - The audit is the source of truth. Confirm your plan with a counselor.
 
 ## Course database

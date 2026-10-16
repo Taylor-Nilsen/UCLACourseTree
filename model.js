@@ -9,6 +9,14 @@
   const numOf = n => parseInt(String(n).replace(/^\D+/, ''), 10);
   const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
 
+  // ranges and wildcards ("PSYCH 110 TO 199", "PSYCH 1@@" = 100-199, "SPAN @" = any) expand against COURSES
+  let table = null;
+  function expand(o) {
+    table = table || Object.keys(COURSES).map(k => [k, DARS.splitCode(k)]).filter(x => x[1]);
+    const w = o.wildcard && o.wildcard.replace(/[^@\d]/g, ''), re = w && (/^@*$/.test(w) ? /./ : new RegExp('^' + w.replace(/@/g, '\\d') + '$'));
+    return table.filter(([, sc]) => sc.dept === o.dept && (re ? re.test(String(numOf(sc.num))) : numOf(sc.num) >= numOf(o.num) && numOf(sc.num) <= numOf(o.to))).map(x => x[0]);
+  }
+
   function build(parsed, opts = {}) {
     const per = opts.perQuarter || 4, choices = opts.choices || {}, warnings = [];
     // done/ip only (failed, withdrawn, incomplete attempts do not count), with aliases (MATH T03 -> MATH 31B)
@@ -16,11 +24,6 @@
     const taken = {};
     for (const [c, t] of Object.entries(parsed.taken)) if (['done', 'ip'].includes(st(t))) taken[c] = t;
     for (const [c, t] of Object.entries(taken)) if (ALIAS[c] && !taken[ALIAS[c]]) taken[ALIAS[c]] = Object.assign({}, t, { via: c });
-    // ranges and wildcards ("PSYCH 110 TO 199", "PSYCH 1@@") expand against every course table loaded
-    const table = Object.keys(Object.assign({}, env.UCLA_COURSES || {}, COURSES)).map(k => [k, DARS.splitCode(k)]).filter(x => x[1]);
-    const wildRe = w => /^@*$/.test(w) ? /./ : new RegExp('^' + w.replace(/[^@\d]/g, '').replace(/@/g, '\\d') + '$');
-    const expand = o => { const n = numOf, re = o.wildcard && wildRe(o.wildcard);
-      return table.filter(([, sc]) => sc.dept === o.dept && (re ? re.test(String(n(sc.num))) : n(sc.num) >= n(o.num) && n(sc.num) <= n(o.to))).map(x => x[0]); };
     const chosenBy = new Map(); // code -> groupKey that plans it
 
     // count checks: compare against the itemized groups of the section right before
@@ -42,10 +45,11 @@
           all.push(...codes);
           if (o.to || o.wildcard) codes.forEach(c => slots.push([c])); else if (codes.length) slots.push(codes);
         }
-        const options = [...new Set(all)];
+        const notFrom = new Set(gr.notFrom.concat(...(gr.notFromRanges || []).map(expand)));
+        const options = [...new Set(all)].filter(c => !notFrom.has(c)); // NOT FROM courses are never offered
         const out = { key: s.title + '|' + gr.name + '|' + i, section: s.title, name: gr.name, need: gr.needCourses, taken: gr.taken,
           chosen: [], alternatives: [], placeholder: !gr.undeclared && (BIGLIST.test(s.title) || options.length > 60 || !all.some(c => COURSES[c])), choice: false, undeclared: !!gr.undeclared, undecided: false, optionCount: options.length, options, selected: true, altGroupKeys: [],
-          _slots: slots, _notFrom: gr.notFrom, _orPrev: !!gr.orPrev, _ew: EW.test(s.title), _writing: /WRITING/.test(s.title),
+          _slots: slots, _notFrom: [...notFrom], _orPrev: !!gr.orPrev, _ew: EW.test(s.title), _writing: /WRITING/.test(s.title),
           _slotUnits: gr.needUnits && gr.needCourses ? gr.needUnits / gr.needCourses : 4 };
         sec.push(out); groups.push(out);
       });
