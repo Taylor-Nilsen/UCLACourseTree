@@ -46,6 +46,8 @@ Tests: `npm test` (needs Node, no dependencies).
 
 ## Adjusting the quarter plan
 
+Drag a class to another quarter to move it there. If it isn't offered in that quarter, a dialog says so and offers the nearest quarters it is offered, one before and one after. A moved class waits for its quarter and takes a seat there first; the planner refills the seat it left. If its prerequisites aren't done before that quarter, the move can't apply and the constraints list says why.
+
 Hover (or tap) a class in the Quarter plan for two small buttons:
 
 - » Defer: push it to the next quarter it is offered. Anything that needs it moves with it.
@@ -53,7 +55,7 @@ Hover (or tap) a class in the Quarter plan for two small buttons:
 
 A red asterisk in a class's upper-left corner means you need to take it that quarter: delaying it by one offered quarter would push you past your expected graduation, or leave a course with no quarter it can be taken in. Finishing a quarter later but still on time does not count. The detail panel says what it would push back, or how many quarters a class can slip.
 
-Small changes apply at once with an Undo button. If a change pushes back graduation, pushes a course past your expected graduation, leaves a course unschedulable, or moves 3 or more other courses, a dialog lists what moves and lets you undo or continue. Constraints are saved in your browser and cleared when you load a new audit.
+Moves, defers and conflicts all show up in "Your scheduling constraints"; × removes one. Small changes apply at once with an Undo button. If a change pushes back graduation, pushes a course past your expected graduation, leaves a course unschedulable, or moves 3 or more other courses, a dialog lists what moves and lets you undo or continue. Constraints are saved in your browser and cleared when you load a new audit.
 
 ## What to take next
 
@@ -70,7 +72,7 @@ Under each class are up to 3 alternates for if you can't get it, best on top. Ea
 3. Options for requirements you haven't selected yet.
 4. A GE slot planned for later.
 
-Each class lists at most one option per requirement, and a course already shown under a more important class only repeats when nothing else fits. Click an alternate to see its prerequisites or its requirement's options. » on a class defers it to the next quarter it is offered, and the planner refills the seat itself (same as » in the Quarter plan).
+Each class lists at most one option per requirement, and a course already shown under a more important class only repeats when nothing else fits. Click an alternate to see its prerequisites or its requirement's options. Drag an alternate onto a class at the top to take it that quarter instead: the alternate is moved there (and selected, if it is an option for a requirement), and the class it replaces is deferred to the next quarter it is offered. » and ≠ work the same as in the Quarter plan.
 
 ## Export
 

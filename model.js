@@ -277,22 +277,24 @@
     const exp = DARS.termIndex(parsed.student.expected), t0 = DARS.termIndex(parsed.currentTerm), have0 = Object.keys(taken), NONE = new Set();
     const qOf = t => 'FWSU'[((t % 4) + 4) % 4];
     const usable = t => opts.useSummer || qOf(t) !== 'U';
-    // notBefore: code -> earliest term index (defers, what-if slips); ban: code -> term indexes it may not use (conflicts)
-    function schedule(notBefore, ban) {
+    // notBefore: code -> earliest term index (defers, what-if slips); ban: code -> term indexes it may not use (conflicts);
+    // pins: code -> term index the user moved it to. A pinned course waits for that term and takes a seat first there (even past
+    // perQuarter) when it is offered, not banned and its prereqs are met; otherwise it is scheduled normally after it.
+    function schedule(notBefore, ban, pins = PINS) {
       const at = new Map(), plan = [], have = new Set(have0);
       let left = order, sl = slots.slice(), t = t0, quarters = 0;
       while ((left.length || sl.length) && quarters < 16) {
         if (!usable(++t)) continue;
         quarters++;
-        const q = qOf(t), picks = [];
+        const q = qOf(t), ok = n => (n.offered === '?' || n.offered.includes(q)) && !(ban.get(n.code) || NONE).has(t) && n.prereqs.every(grp => grp.some(x => have.has(x)));
+        const picks = left.concat(sl).filter(n => pins.get(n.code) === t && ok(n)), free = n => !picks.includes(n) && !(pins.get(n.code) > t);
         for (const n of left) {
           if (picks.length >= per) break;
-          if ((n.offered === '?' || n.offered.includes(q)) && !(notBefore.get(n.code) > t) && !(ban.get(n.code) || NONE).has(t) &&
-            n.prereqs.every(grp => grp.some(x => have.has(x)))) picks.push(n);
+          if (free(n) && !(notBefore.get(n.code) > t) && ok(n)) picks.push(n);
         }
-        picks.push(...sl.splice(0, per - picks.length));
+        picks.push(...sl.filter(free).slice(0, Math.max(0, per - picks.length)));
         if (!picks.length) continue;
-        left = left.filter(n => !picks.includes(n));
+        left = left.filter(n => !picks.includes(n)); sl = sl.filter(n => !picks.includes(n));
         picks.forEach(n => { at.set(n.code, t); have.add(n.code); });
         plan.push({ t, picks });
       }
@@ -311,6 +313,15 @@
       if (!realSet.has(c)) warnings.push(`Ignored your deferral of ${c}: it is not a course in the plan.`);
       else if (ti == null) warnings.push(`Ignored your deferral of ${c}: "${term}" is not a term.`);
       else notBefore.set(c, ti);
+    }
+    // pins (moves): that term, if it is after the current term, usable and the course is offered then; a pin beats a defer
+    const PINS = new Map(), todoSet = new Set(real.concat(slots).map(n => n.code));
+    for (const [c, term] of Object.entries(opts.pins || {})) {
+      const ti = DARS.termIndex(term), n = nodes.get(c);
+      if (!todoSet.has(c)) warnings.push(`Ignored your move of ${c}: it is not in the plan.`);
+      else if (ti == null || ti <= t0 || !usable(ti)) warnings.push(`Ignored your move of ${c} to ${term}: not a quarter the plan uses.`);
+      else if (!(n.offered === '?' || n.offered.includes(qOf(ti)))) warnings.push(`Ignored your move of ${c} to ${term}: it is not offered in ${{ F: 'Fall', W: 'Winter', S: 'Spring', U: 'Summer' }[qOf(ti)]}.`);
+      else { PINS.set(c, ti); notBefore.delete(c); }
     }
     // conflicts: a and b can't share `term`. Plan it both ways and keep the course whose move hurts less:
     // unscheduled courses, then final term, then courses past expected graduation, then other courses moved, then total shift.
@@ -361,8 +372,8 @@
       if (!cur.at.has(n.code)) continue;
       let s = 0, t = cur.at.get(n.code), why = null;
       while (s < 4 && (t = nextOff(n, t)) != null) {
-        const nb = new Map(notBefore); nb.set(n.code, t);
-        const run = schedule(nb, ban);
+        const nb = new Map(notBefore), pw = new Map(PINS); nb.set(n.code, t); pw.delete(n.code);
+        const run = schedule(nb, ban, pw);
         if (hurts(run)) {
           const np = past(run).filter(c => !pastBase.has(c)), gone = run.left.filter(x => !cur.left.includes(x)).map(x => x.code);
           why = lateEnd(run) ? `your last quarter to ${tn(run.final)}, past expected graduation` : np.length ? `${np.slice(0, 2).join(', ')}${np.length > 2 ? ' and more' : ''} past expected graduation` : `${gone.join(', ')} out of the plan`;
@@ -374,6 +385,7 @@
       if (n.critical) n.criticalWhy = why;
     }
     for (const [c, t] of cur.at) nodes.get(c).planned = DARS.termName(t);
+    for (const [c, t] of PINS) if (cur.at.get(c) !== t) warnings.push(`Couldn't move ${c} to ${tn(t)}: ${(ban.get(c) || NONE).has(t) ? 'a conflict you marked moves it out' : 'its prerequisites are not done before then'}.`);
     order.forEach((n, i) => { n.priority = i; n.unlocks = unlocks(n.code); });
     const plan = cur.plan.map(({ t, picks }) => ({ term: DARS.termName(t), courses: picks.map(n => n.code), units: picks.reduce((u, n) => u + n.units, 0), beyondExpected: t > exp }));
     if (cur.left.length) warnings.push(`Stopped planning after 16 quarters; still unscheduled: ${cur.left.map(n => n.code).join(', ')}.`);
@@ -389,18 +401,29 @@
   }
   // What-if for the UI: { before, after, diff, opts } where opts is `opts` with the change applied (hand it to build to keep it).
   // change: { type: 'defer', code } (to the next quarter it is offered after its planned one) | { type: 'conflict', a, b, term }
-  //       | { type: 'undefer', code } | { type: 'unconflict', a, b, term }. Never throws on a course that is not planned.
+  //       | { type: 'undefer', code } | { type: 'unconflict', a, b, term } | { type: 'move', code, term } (pin it there)
+  //       | { type: 'unmove', code } | { type: 'swapIn', code, out, term } (pin code to term, defer out past it).
+  // Never throws on a course that is not planned.
   function previewChange(parsed, opts = {}, change = {}) {
-    const before = build(parsed, opts), o = Object.assign({}, opts, { defers: Object.assign({}, opts.defers), conflicts: (opts.conflicts || []).slice() });
+    const before = build(parsed, opts), o = Object.assign({}, opts, { defers: Object.assign({}, opts.defers), pins: Object.assign({}, opts.pins), conflicts: (opts.conflicts || []).slice() });
     const same = (x, y) => x && y && x.term === y.term && [x.a, x.b].sort().join('|') === [y.a, y.b].sort().join('|');
-    const n = before.nodes.find(x => x.code === change.code), subject = [change.code, change.a, change.b].filter(Boolean);
-    if (change.type === 'defer' && n && n.planned) {
-      const t = DARS.termIndex(n.planned);
+    const node = c => before.nodes.find(x => x.code === c), n = node(change.code), subject = [change.code, change.a, change.b, change.out].filter(Boolean);
+    // defer to the next quarter it is offered after `term`
+    const deferPast = (x, term) => {
+      const t = DARS.termIndex(term);
+      delete o.pins[x.code];
       for (let u = t + 1; u <= t + 8; u++) {
         const q = 'FWSU'[u % 4];
-        if ((opts.useSummer || q !== 'U') && (n.offered === '?' || n.offered.includes(q))) { o.defers[n.code] = DARS.termName(u); break; }
+        if ((opts.useSummer || q !== 'U') && (x.offered === '?' || x.offered.includes(q))) { o.defers[x.code] = DARS.termName(u); break; }
       }
-    } else if (change.type === 'undefer') delete o.defers[change.code];
+    };
+    if (change.type === 'defer' && n && n.planned) deferPast(n, n.planned);
+    else if (change.type === 'move' || change.type === 'swapIn') {
+      o.pins[change.code] = change.term; delete o.defers[change.code];
+      const out = change.type === 'swapIn' && node(change.out); // a GE:/CHOOSE: slot makes room by itself
+      if (out && !/^(GE|CHOOSE): /.test(out.code)) deferPast(out, change.term);
+    } else if (change.type === 'unmove') delete o.pins[change.code];
+    else if (change.type === 'undefer') delete o.defers[change.code];
     else if (change.type === 'conflict' && !o.conflicts.some(x => same(x, change))) o.conflicts.push({ a: change.a, b: change.b, term: change.term });
     else if (change.type === 'unconflict') o.conflicts = o.conflicts.filter(x => !same(x, change));
     const after = build(parsed, o);

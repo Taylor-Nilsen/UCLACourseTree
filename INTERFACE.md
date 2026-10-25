@@ -148,13 +148,18 @@ with a ⇄ button (`aria-label="Change selection for <group name>"`) that opens 
 and the course detail shows "Selected for: <group name>" with a "Change selection" button to the same panel. The panel says "N more to select" while slots are open, and which selection a new one replaces once the group is full. Selecting in an alternative group selects that group (the UI also records it as the taken path).
 `opts.choices['path:' + pathChoiceKey]`: group keys of the taken paths, at most `pick` (UI drops the oldest).
 
-### Scheduling constraints (`opts.defers`, `opts.conflicts`) and `MODEL.previewChange`
+### Scheduling constraints (`opts.defers`, `opts.pins`, `opts.conflicts`) and `MODEL.previewChange`
 The scheduler is greedy: quarter by quarter from the one after `currentTerm` (summers only with `useSummer`), it takes up
 to `perQuarter` eligible courses in one fixed priority order (longest chain of later courses, then most direct dependents,
 then units); `GE:`/`CHOOSE:` slots fill what is left. Eligible = offered that quarter (`'?'` = any), every prereq AND-group
 met in an earlier quarter, and not excluded by a constraint. It is re-run (not the whole build) for every what-if below.
 - `defers[code] = term`: not before `term`, still only in offered quarters. A code that is not a schedulable course in the
   plan, or a bad term, is ignored with a warning ("Ignored your deferral of ...").
+- `pins[code] = term` (a drag-and-drop move): the course (or `GE:`/`CHOOSE:` slot) is not scheduled before `term`, and at `term`
+  takes a seat first, even past `perQuarter`, when it is offered, not barred by a conflict and its prereqs are met; otherwise it is
+  scheduled normally after `term` with the warning "Couldn't move X to T: ...". A pin beats a defer of the same code. A pin on a
+  code not in the plan, a term at or before `currentTerm` (or a summer without `useSummer`) or a quarter the course is not
+  offered in is ignored with a warning ("Ignored your move of ..."). `critical`/`slack` slips drop the course's own pin.
 - `conflicts[i] = { a, b, term }`: a and b can't both sit in `term` (a section-time clash). Applied in array order. If both
   are planned there, the plan is built twice, once with a barred from `term` and once with b, and scored, in order, by:
   unscheduled courses, last planned term, courses newly past expected graduation, other courses whose term changed,
@@ -168,7 +173,9 @@ met in an earlier quarter, and not excluded by a constraint. It is re-run (not t
 
 `MODEL.previewChange(parsed, opts, change) -> { before, after, opts, diff }` (pure; `opts` is the input with the change
 applied, ready to persist). `change`: `{ type: 'defer', code }` (to the next offered quarter after its planned one),
-`{ type: 'conflict', a, b, term }`, `{ type: 'undefer', code }`, `{ type: 'unconflict', a, b, term }` (the pair in either order).
+`{ type: 'conflict', a, b, term }`, `{ type: 'undefer', code }`, `{ type: 'unconflict', a, b, term }` (the pair in either order),
+`{ type: 'move', code, term }` (sets `pins[code]`, drops its defer), `{ type: 'unmove', code }`, `{ type: 'swapIn', code, out, term }`
+(pins `code` to `term` and defers `out` to its next offered quarter after `term`; a `GE:`/`CHOOSE:` `out` is left alone). A defer drops the course's pin.
 `diff = { finalTermBefore, finalTermAfter, pastExpected: string[] /* newly past expected */, moved: [{ code, from, to }],
 unschedulable: string[] /* planned before, not after */, severity }`. `severity` is `'major'` when the last planned term
 moves later, a course becomes past expected or unschedulable, or 3+ other courses move (the changed course(s) and
@@ -185,5 +192,7 @@ it by a conflict. Order: options of the same requirement (`same: true`; a course
 slot's group), then a pool of later-planned courses (by `priority`), options of undecided selected choice groups, and later
 `GE:` slots. Pool entries go one per `groupKey` per pick, preferring entries shown under fewer earlier picks. A `GE:` slot pick has no alternates.
 Planned real nodes also carry `priority` (index in the scheduler's order) and `unlocks` (count of later courses that need it, transitively).
-Plan chips: » defers, ≠ starts conflict mode (then click a class in the same quarter); a red `*` in the upper-left corner marks
+Plan chips drag between quarters (`move`; a quarter it is not offered in opens a dialog offering the nearest offered quarter
+before and after). "What to take next" alternates drag onto a top class (`swapIn`, after selecting the alternate in its
+group when it is an unselected option). Plan chips: » defers, ≠ starts conflict mode (then click a class in the same quarter); a red `*` in the upper-left corner marks
 `critical` (also on Tree nodes; a black `*` in the export).

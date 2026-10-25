@@ -438,4 +438,19 @@ t('nextQuarter: a selected course lists its unselected siblings first', () => {
   const deferred = MODEL.build(p, { perQuarter: 3, choices: { [key]: ['ZZ 10'] }, defers: { 'ZZ 14': 'SP27' } });
   assert.ok(!MODEL.nextQuarter(deferred, 'WI27', { defers: { 'ZZ 14': 'SP27' } }).picks.some(x => x.alts.some(a => a.code === 'ZZ 14')));
 });
+t('pins: move a course to a quarter, swap one in, refuse quarters it is not offered in or before its prereqs', () => {
+  const at = (mm, c) => (mm.nodes.find(x => x.code === c) || {}).planned;
+  assert.equal(at(MODEL.build(chain, { pins: { 'ZZ 10': 'FA27' } }), 'ZZ 10'), 'FA27');
+  const early = MODEL.build(chain, { pins: { 'ZZ 51': 'WI27' } });
+  assert.equal(at(early, 'ZZ 51'), 'SP27'); assert.ok(early.warnings.some(w => /^Couldn't move ZZ 51 to WI27: its prerequisites/.test(w)), early.warnings.join('\n'));
+  const fw = synth([['R', 2, [zz('ZZ 21'), zz('ZZ 22')]]]), off = MODEL.build(fw, { pins: { 'ZZ 21': 'WI27' } });
+  assert.equal(at(off, 'ZZ 21'), 'FA27'); assert.ok(off.warnings.some(w => /move of ZZ 21 to WI27: it is not offered in Winter/.test(w)));
+  const sw = MODEL.previewChange(three, { perQuarter: 2 }, { type: 'swapIn', code: 'ZZ 12', out: 'ZZ 10', term: 'WI27' });
+  assert.deepEqual(sw.opts.pins, { 'ZZ 12': 'WI27' }); assert.deepEqual(sw.opts.defers, { 'ZZ 10': 'SP27' });
+  assert.deepEqual(sw.after.plan.map(p => [p.term, p.courses.slice().sort()]), [['WI27', ['ZZ 11', 'ZZ 12']], ['SP27', ['ZZ 10']]]);
+  const mv = MODEL.previewChange(three, { perQuarter: 2, defers: { 'ZZ 12': 'FA27' } }, { type: 'move', code: 'ZZ 12', term: 'WI27' });
+  assert.deepEqual(mv.opts.defers, {}); assert.equal(at(mv.after, 'ZZ 12'), 'WI27'); assert.equal(mv.after.plan[0].courses.length, 2);
+  assert.deepEqual(MODEL.previewChange(three, mv.opts, { type: 'unmove', code: 'ZZ 12' }).opts.pins, {});
+  assert.deepEqual(MODEL.previewChange(three, mv.opts, { type: 'defer', code: 'ZZ 12' }).opts.pins, {}); // a defer replaces the move
+});
 console.log(n + ' passed');

@@ -61,7 +61,7 @@
   const saved = store.get('dars.opts') || {};
   const S = {
     parsed: null, model: null, tab: 'tree', zoom: 1, detail: null,
-    opts: { choices: saved.choices || {}, defers: saved.defers || {}, conflicts: saved.conflicts || [], perQuarter: saved.perQuarter || 4, useSummer: !!saved.useSummer },
+    opts: { choices: saved.choices || {}, defers: saved.defers || {}, pins: saved.pins || {}, conflicts: saved.conflicts || [], perQuarter: saved.perQuarter || 4, useSummer: !!saved.useSummer },
     altOpen: {}, filters: {}, conflictFrom: null /* { code, term } while the user selects the other class */, modal: null,
   };
 
@@ -84,7 +84,7 @@
     const parsed = DARS.parse(lines); // never throws; ok:false carries a reason
     S.diag = { parsed, lines };
     if (!parsed.ok) { showError(parsed.reason); $('#error').insertAdjacentHTML('beforeend', ' ' + DIAG); return; }
-    if (fresh) { S.opts.choices = {}; S.opts.defers = {}; S.opts.conflicts = []; S.detail = null; S.conflictFrom = null; S.nextTerm = null; }
+    if (fresh) { S.opts.choices = {}; S.opts.defers = {}; S.opts.pins = {}; S.opts.conflicts = []; S.detail = null; S.conflictFrom = null; S.nextTerm = null; }
     S.parsed = parsed;
     store.set('dars.lines', lines); saveOpts();
     rebuild();
@@ -97,7 +97,7 @@
     render();
   }
 
-  const buildOpts = () => ({ choices: S.opts.choices, defers: S.opts.defers, conflicts: S.opts.conflicts, perQuarter: S.opts.perQuarter, useSummer: S.opts.useSummer });
+  const buildOpts = () => ({ choices: S.opts.choices, defers: S.opts.defers, pins: S.opts.pins, conflicts: S.opts.conflicts, perQuarter: S.opts.perQuarter, useSummer: S.opts.useSummer });
   function saveOpts() { store.set('dars.opts', S.opts); }
   function commit() { saveOpts(); rebuild(); }
 
@@ -422,47 +422,60 @@
     const chipFor = (c, term) => {
       const n = nm[c] || {};
       if (c.startsWith('CHOOSE: ')) return `<button class="pchip choose" ${n.pathChoiceKey ? `data-path="${esc(n.pathChoiceKey)}"` : isGE(n) ? `data-node="${esc(c)}"` : `data-group="${esc(n.groupKey)}"`} title="Decision pending: open the options"><b>choose: ${esc(n.title)}</b><small>${esc(n.units ?? '')} u</small></button>`;
-      const real = !isSlotCode(c), target = real && cf && cf.term === term && cf.code !== c;
-      const crit = n.critical ? `<span class="crit" role="img" aria-label="${esc(critText(n))}" title="${esc(critText(n))}">*</span>` : '';
-      const acts = real ? `<span class="pacts"><button type="button" class="pact" data-defer="${esc(c)}" aria-label="Defer ${esc(c)} to the next quarter it is offered" title="Defer to the next quarter it is offered">»</button><button type="button" class="pact" data-conflict="${esc(c)}" data-term="${esc(term)}" aria-label="Conflict: mark a class that clashes with ${esc(c)} in ${esc(term)}" title="Conflict…">≠</button></span>` : '';
-      return `<div class="pwrap${target ? ' target' : ''}${cf && cf.code === c && cf.term === term ? ' source' : ''}">${crit}<button class="pchip s-${esc(n.status || '')}" data-node="${esc(c)}"${target ? ` data-cpick="${esc(c)}" aria-label="${esc(c + ' conflicts with ' + cf.code)}"` : ''}><b>${esc(c)}</b><span>${esc(titleOf(c, nm))}</span><small>${esc(n.units ?? '')} u</small></button>${acts}</div>`;
+      return courseChip(c, term, nm, `data-drag="${esc(c)}" data-from="${esc(term)}"`);
     };
-    const st = $('#cfstatus');
-    st.hidden = !cf;
-    st.innerHTML = cf ? `Select the class that conflicts with <b>${esc(cf.code)}</b> in ${esc(cf.term)} <span class="muted">(Esc to cancel)</span> <button type="button" class="btn sm" data-cfcancel>Cancel</button>` : '';
+    renderCfStatus();
     renderConstraints();
-    $('#plan').innerHTML = (S.model.plan || []).map(t => `<div class="term${t.beyondExpected ? ' late' : ''}">
+    $('#plan').innerHTML = (S.model.plan || []).map(t => `<div class="term${t.beyondExpected ? ' late' : ''}" data-drop="plan" data-term="${esc(t.term)}">
       <div class="term-h"><b>${esc(t.term)}</b><span>${esc(t.units)} units</span></div>
       ${t.beyondExpected ? '<span class="tag-late">past expected graduation</span>' : ''}
       ${t.courses.map(c => chipFor(c, t.term)).join('') || '<p class="muted small">No courses</p>'}
     </div>`).join('') || '<p class="muted pad">Nothing left to plan.</p>';
   }
 
+  // a planned class (or GE slot) chip with » defer and ≠ conflict; while picking a conflict, the other classes that term are targets
+  function courseChip(c, term, nm, attrs) {
+    const n = nm[c] || {}, cf = S.conflictFrom, real = !isSlotCode(c), target = real && cf && cf.term === term && cf.code !== c;
+    const crit = n.critical ? `<span class="crit" role="img" aria-label="${esc(critText(n))}" title="${esc(critText(n))}">*</span>` : '';
+    const acts = real ? `<span class="pacts"><button type="button" class="pact" data-defer="${esc(c)}" aria-label="Defer ${esc(c)} to the next quarter it is offered" title="Defer to the next quarter it is offered">»</button><button type="button" class="pact" data-conflict="${esc(c)}" data-term="${esc(term)}" aria-label="Conflict: mark a class that clashes with ${esc(c)} in ${esc(term)}" title="Conflict…">≠</button></span>` : '';
+    return `<div class="pwrap${target ? ' target' : ''}${cf && cf.code === c && cf.term === term ? ' source' : ''}"${attrs ? ' draggable="true" ' + attrs : ''}>${crit}<button class="pchip s-${esc(n.status || '')}" data-node="${esc(c)}"${target ? ` data-cpick="${esc(c)}" aria-label="${esc(c + ' conflicts with ' + cf.code)}"` : ''}><b>${esc(c)}</b><span>${esc(titleOf(c, nm))}</span><small>${esc(n.units ?? '')} u</small></button>${acts}</div>`;
+  }
+  function renderCfStatus() {
+    const cf = S.conflictFrom;
+    document.querySelectorAll('.cfstatus').forEach(st => {
+      st.hidden = !cf;
+      st.innerHTML = cf ? `Select the class that conflicts with <b>${esc(cf.code)}</b> in ${esc(cf.term)} <span class="muted">(Esc to cancel)</span> <button type="button" class="btn sm" data-cfcancel>Cancel</button>` : '';
+    });
+  }
+
   // "What to take next": one column per class of the chosen quarter (most important left), alternates under it (best on top).
-  // » defers a class (the planner then moves the next course in line up); an alternate opens its course or its options panel.
+  // » defers a class, ≠ marks a conflict; an alternate opens its course or its options panel, or is dragged onto a class to take it instead.
   function renderNext() {
     const r = MODEL.nextQuarter(S.model, S.nextTerm, { defers: S.opts.defers }), nm = nodeMap();
+    renderCfStatus();
     $('#nextterm').innerHTML = r.terms.map(t => `<option value="${esc(t)}"${t === r.term ? ' selected' : ''}>${esc(t)}${t === r.terms[0] ? ' (next)' : ''}</option>`).join('');
     const alt = a => {
       const open = nm[a.code] ? `data-node="${esc(a.code)}"` : a.groupKey ? `data-group="${esc(a.groupKey)}"` : '';
-      return `<a href="#" class="nalt" ${open}><b>${esc(a.code)}</b><span>${esc(a.title)}</span><small>${esc(a.why)}</small></a>`;
+      return `<a href="#" class="nalt" draggable="true" data-drag="${esc(a.code)}"${a.groupKey && !nm[a.code] ? ` data-gk="${esc(a.groupKey)}"` : ''} ${open}><b>${esc(a.code)}</b><span>${esc(a.title)}</span><small>${esc(a.why)}</small></a>`;
     };
     $('#next').innerHTML = r.picks.map((x, i) => {
-      const n = nm[x.code] || {}, crit = x.critical ? `<span class="crit" role="img" aria-label="Must be taken this quarter" title="Must be taken this quarter">*</span>` : '';
+      const n = nm[x.code] || {};
       const top = x.code.startsWith('CHOOSE: ')
         ? `<button class="pchip choose" ${n.pathChoiceKey ? `data-path="${esc(n.pathChoiceKey)}"` : `data-group="${esc(n.groupKey)}"`}><b>choose: ${esc(n.title)}</b><small>${esc(x.units)} u</small></button>`
-        : `<div class="pwrap">${crit}<button class="pchip s-${esc(n.status || '')}" data-node="${esc(x.code)}"><b>${esc(x.code)}</b><span>${esc(x.title)}</span><small>${esc(x.units)} u</small></button>${x.slot ? '' : `<span class="pacts"><button type="button" class="pact" data-defer="${esc(x.code)}" aria-label="Can't take ${esc(x.code)}: defer it to the next quarter it is offered" title="Can't take it: defer to the next quarter it is offered">»</button></span>`}</div>`;
-      return `<div class="ncol"><div class="nrank">#${i + 1}${i || x.slot ? '' : ' most important'}</div><div class="ntop">${top}</div><span class="nwhy">${esc(x.why)}</span>
+        : courseChip(x.code, r.term, nm, '');
+      return `<div class="ncol"><div class="nrank">#${i + 1}${i || x.slot ? '' : ' most important'}</div><div class="ntop" data-drop="next" data-out="${esc(x.code)}" data-term="${esc(r.term)}">${top}</div><span class="nwhy">${esc(x.why)}</span>
         ${x.alts.length ? `<div class="nalt-h">If you can't take it:</div>${x.alts.map(alt).join('')}` : x.slot ? '' : '<div class="nalt-h">Nothing else can be taken this quarter in its place.</div>'}</div>`;
     }).join('') || '<p class="muted pad">Nothing left to plan.</p>';
   }
 
   // "Your scheduling constraints": each defer and conflict (with the model's reason) and a × that removes it
   function renderConstraints() {
-    const d = Object.entries(S.opts.defers || {}), cs = S.opts.conflicts || [], res = S.model.conflictResolutions || [], box = $('#constraints');
-    box.hidden = !d.length && !cs.length;
+    const d = Object.entries(S.opts.defers || {}), p = Object.entries(S.opts.pins || {}), cs = S.opts.conflicts || [], res = S.model.conflictResolutions || [], box = $('#constraints');
+    box.hidden = !d.length && !p.length && !cs.length;
     const x = (attrs, label) => `<button type="button" class="cx" ${attrs} aria-label="${esc(label)}" title="${esc(label)}">×</button>`;
     box.innerHTML = box.hidden ? '' : '<h3>Your scheduling constraints</h3><ul>' +
+      p.map(([c, t]) => { const w = (S.model.warnings || []).find(w => w.includes(` ${c} to ${t}:`));
+        return `<li><span>Move <b>${esc(c)}</b> to ${esc(t)}${w ? `<br><small class="muted">${esc(w)}</small>` : ''}</span>${x(`data-unmove="${esc(c)}"`, 'Remove move of ' + c)}</li>`; }).join('') +
       d.map(([c, t]) => `<li><span>Defer <b>${esc(c)}</b> to ${esc(t)} or later</span>${x(`data-undefer="${esc(c)}"`, 'Remove deferral of ' + c)}</li>`).join('') +
       cs.map((c, i) => { const r = res.find(r => r.term === c.term && r.a === c.a && r.b === c.b);
         return `<li><span>Conflict in ${esc(c.term)}: <b>${esc(c.a)}</b> and <b>${esc(c.b)}</b><br><small class="muted">${esc(r ? r.why : 'Ignored: one of these is no longer in the plan.')}</small></span>${x(`data-unconflict="${i}"`, `Remove conflict between ${c.a} and ${c.b}`)}</li>`; }).join('') + '</ul>';
@@ -470,19 +483,24 @@
 
   // ---------- scheduling changes: preview, then apply; major ones ask (modal), the rest offer Undo (toast) ----------
   const shortCode = c => trunc(c, 44);
-  function tryChange(change) {
-    const prev = { opts: JSON.parse(JSON.stringify(S.opts)), model: S.model };
+  function tryChange(change, prev = { opts: JSON.parse(JSON.stringify(S.opts)), model: S.model }) {
     let r;
     try { r = MODEL.previewChange(S.parsed, buildOpts(), change); } catch (e) { console.error(e); return showError('Could not apply that change: ' + e.message); }
-    S.opts.defers = r.opts.defers; S.opts.conflicts = r.opts.conflicts; S.conflictFrom = null;
+    S.opts.defers = r.opts.defers; S.opts.pins = r.opts.pins; S.opts.conflicts = r.opts.conflicts; S.conflictFrom = null;
     saveOpts(); S.model = r.after; render();
     if (r.diff.severity === 'major') return showModal(r.diff, prev);
-    if (change.type === 'defer' || change.type === 'conflict') showToast(changeText(change, r), prev);
+    if (!/^un/.test(change.type)) showToast(changeText(change, r), prev);
   }
   function changeText(ch, r) {
     const mv = r.diff.moved, own = mv.find(x => x.code === ch.code);
     const others = mv.filter(x => ![ch.code, ch.a, ch.b].includes(x.code));
     const say = list => list.slice(0, 3).map(x => `${shortCode(x.code)} moved to ${x.to}${own && x.to === own.from ? ' to fill the slot' : ''}.`).join(' ') + (list.length > 3 ? ` ${list.length - 3} more moved.` : '');
+    if (ch.type === 'move' || ch.type === 'swapIn') {
+      const fail = r.after.warnings.find(w => w.startsWith(`Couldn't move ${ch.code} `) || w.startsWith(`Ignored your move of ${ch.code} `));
+      if (fail) return fail;
+      const out = ch.type === 'swapIn' && mv.find(x => x.code === ch.out);
+      return `Moved ${ch.code} to ${ch.term}.` + (out ? ` ${shortCode(out.code)} moved to ${out.to}.` : '') + (others.length ? ' ' + say(others.filter(x => x.code !== ch.out)) : '');
+    }
     if (ch.type === 'defer') return own ? `Deferred ${ch.code} to ${own.to}. ${say(others)}`.trim() : `${ch.code} could not be deferred.`;
     const res = (r.after.conflictResolutions || []).find(x => x.term === ch.term && x.a === ch.a && x.b === ch.b);
     if (!res || !res.kept) return res ? res.why : 'Conflict saved.';
@@ -504,16 +522,33 @@
       (diff.pastExpected.length ? `<p><b>Now past expected graduation (${esc(S.model.expectedTerm)}):</b></p>${li(diff.pastExpected.map(esc))}` : '') +
       (diff.unschedulable.length ? `<p><b>Can no longer be scheduled:</b></p>${li(diff.unschedulable.map(esc))}` : '') +
       (diff.moved.length ? `<p><b>Courses that move:</b></p>${li(diff.moved.map(x => `${esc(shortCode(x.code))}: ${esc(x.from)} → ${esc(x.to)}`))}` : '');
+    openModal('This change causes scheduling problems', '<button type="button" class="btn primary" data-modal="undo">Undo</button><button type="button" class="btn" data-modal="continue">Continue anyway</button>', prev);
+  }
+  function openModal(title, buttons, prev) {
+    $('#modal-t').textContent = title; $('#modal-btns').innerHTML = buttons;
     S.modal = { prev, focus: document.activeElement };
     ['header.bar', '#app', '#detail'].forEach(q => { $(q).inert = true; });
     $('#modal').hidden = false;
-    $('#modal [data-modal="undo"]').focus();
+    $('#modal-btns button').focus();
+  }
+  // dropped in a quarter it isn't offered in: offer the nearest offered quarters, one before and one after
+  function offerNearest(code, term) {
+    const n = nodeMap()[code], ti = DARS.termIndex(term), t0 = DARS.termIndex(S.model.currentTerm);
+    const okAt = u => (S.opts.useSummer || u % 4 !== 3) && (n.offered === '?' || n.offered.includes('FWSU'[u % 4]));
+    let before = null, after = null;
+    for (let u = ti - 1; u > t0 && before == null; u--) if (okAt(u)) before = u;
+    for (let u = ti + 1; u <= ti + 8 && after == null; u++) if (okAt(u)) after = u;
+    const QN = { F: 'Fall', W: 'Winter', S: 'Spring', U: 'Summer' }, b = (u, w) => u == null ? '' : `<button type="button" class="btn${w === 'after' ? '' : ' primary'}" data-moveto="${esc(DARS.termName(u))}" data-code="${esc(code)}">${esc(DARS.termName(u))} (${w})</button>`;
+    $('#toast').hidden = true;
+    $('#modal-b').innerHTML = `<p>${esc(code)} is offered ${esc(offeredText(code))}, so it can't go in ${esc(term)}.</p>` +
+      (before == null && after == null ? '<p>No nearby quarter offers it.</p>' : '<p>Move it to the nearest quarter it is offered instead?</p>');
+    openModal(`${code} isn't offered in ${QN['FWSU'[ti % 4]]}`, b(before, 'before') + b(after, 'after') + '<button type="button" class="btn" data-modal="cancel">Cancel</button>', null);
   }
   function closeModal(doUndo) {
     const m = S.modal; if (!m) return;
     S.modal = null; $('#modal').hidden = true;
     ['header.bar', '#app', '#detail'].forEach(q => { $(q).inert = false; });
-    if (doUndo) undo(m.prev);
+    if (doUndo && m.prev) undo(m.prev);
     const back = m.focus && document.contains(m.focus) ? m.focus : $('[data-tab="plan"]');
     if (back) back.focus();
   }
@@ -595,7 +630,15 @@
 
   // ---------- choices ----------
   function pin(key, code) {
-    const g = groupByKey(key); if (!g) return;
+    const g = select(key, code); if (!g) return;
+    // pinning inside a path that is not taken takes that path
+    const pc = g.selected === false && pcOfGroup(key);
+    if (pc) return takePath(pc.key, key);
+    commit();
+  }
+  // record a selection without rebuilding
+  function select(key, code) {
+    const g = groupByKey(key); if (!g) return null;
     const a = (S.opts.choices[key] || []).filter(c => c !== code); a.push(code);
     while (a.length > Math.max(1, g.need || 1)) a.shift();
     // a course counts for one pick only: drop it from every other group's pins
@@ -604,10 +647,7 @@
       if (r.length) S.opts.choices[k] = r; else delete S.opts.choices[k];
     }
     S.opts.choices[key] = a;
-    // pinning inside a path that is not taken takes that path
-    const pc = g.selected === false && pcOfGroup(key);
-    if (pc) return takePath(pc.key, key);
-    commit();
+    return g;
   }
   // take a path: it joins the picks (oldest dropped beyond pick k); pins in paths no longer taken are dropped
   function takePath(pcKey, gk) {
@@ -631,18 +671,20 @@
 
   // ---------- events ----------
   document.addEventListener('click', e => {
-    const t = e.target.closest('[data-act],[data-node],[data-group],[data-path],[data-take],[data-change],[data-tab],[data-zoom],[data-sample],[data-close],[data-diag],[data-defer],[data-conflict],[data-cfcancel],[data-undefer],[data-unconflict],[data-toastundo],[data-modal]');
+    const t = e.target.closest('[data-act],[data-node],[data-group],[data-path],[data-take],[data-change],[data-tab],[data-zoom],[data-sample],[data-close],[data-diag],[data-defer],[data-conflict],[data-cfcancel],[data-undefer],[data-unconflict],[data-toastundo],[data-modal],[data-moveto],[data-unmove]');
     if (!t) return;
     if (t.dataset.modal) return closeModal(t.dataset.modal === 'undo');
+    if (t.dataset.moveto) { closeModal(false); return tryChange({ type: 'move', code: t.dataset.code, term: t.dataset.moveto }); }
+    if (t.dataset.unmove) return tryChange({ type: 'unmove', code: t.dataset.unmove });
     if (t.dataset.toastundo !== undefined) { const p = S.toastPrev; $('#toast').hidden = true; S.toastPrev = null; return p && undo(p); }
-    if (t.dataset.cfcancel !== undefined) { S.conflictFrom = null; return renderPlan(); }
+    if (t.dataset.cfcancel !== undefined) { S.conflictFrom = null; return renderTabs(); }
     if (t.dataset.cpick && S.conflictFrom) { const { code, term } = S.conflictFrom; return tryChange({ type: 'conflict', a: code, b: t.dataset.cpick, term }); }
     if (t.dataset.defer) return tryChange({ type: 'defer', code: t.dataset.defer });
     if (t.dataset.conflict) {
       const same = S.conflictFrom && S.conflictFrom.code === t.dataset.conflict;
       S.conflictFrom = same ? null : { code: t.dataset.conflict, term: t.dataset.term };
-      renderPlan();
-      const first = document.querySelector('.pwrap.target .pchip');
+      renderTabs();
+      const first = document.querySelector((S.tab === 'next' ? '#next' : '#plan') + ' .pwrap.target .pchip');
       if (first) first.focus();
       return;
     }
@@ -674,10 +716,39 @@
       }
       return;
     }
-    if (e.key === 'Escape' && S.conflictFrom) { S.conflictFrom = null; return renderPlan(); }
+    if (e.key === 'Escape' && S.conflictFrom) { S.conflictFrom = null; return renderTabs(); }
     if (e.key === 'Escape' && S.detail) { S.detail = null; renderDetail(); }
     if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('.node,.cnode,.cchip,.pnode,.pbtn,.qlink')) { e.preventDefault(); e.target.dispatchEvent(new MouseEvent('click', { bubbles: true })); }
   });
+  // drag: a plan chip to another quarter (move), or a "What to take next" alternate onto a class at the top (take it instead)
+  const dropZone = e => S.drag && e.target.closest && e.target.closest('[data-drop]');
+  const clearOver = () => document.querySelectorAll('.over').forEach(x => x.classList.remove('over'));
+  document.addEventListener('dragstart', e => {
+    const el = e.target.closest && e.target.closest('[data-drag]'); if (!el) return;
+    S.drag = { code: el.dataset.drag, from: el.dataset.from, gk: el.dataset.gk };
+    e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', el.dataset.drag);
+  });
+  document.addEventListener('dragover', e => { const z = dropZone(e); if (!z) return; e.preventDefault(); if (!z.classList.contains('over')) { clearOver(); z.classList.add('over'); } });
+  document.addEventListener('dragend', () => { S.drag = null; clearOver(); });
+  document.addEventListener('drop', e => {
+    const z = dropZone(e); if (!z) return;
+    e.preventDefault(); clearOver();
+    const d = S.drag, term = z.dataset.term; S.drag = null;
+    if (z.dataset.drop === 'plan') {
+      if (d.from === undefined || d.from === term) return;
+      const n = nodeMap()[d.code], q = 'FWSU'[DARS.termIndex(term) % 4];
+      return n.offered === '?' || n.offered.includes(q) ? tryChange({ type: 'move', code: d.code, term }) : offerNearest(d.code, term);
+    }
+    if (d.from !== undefined || d.code === z.dataset.out) return; // "next" zones take alternates only
+    const prev = { opts: JSON.parse(JSON.stringify(S.opts)), model: S.model };
+    if (d.gk) { // an option not selected yet: select it first, in place of the class it replaces when that is a selection of the same requirement
+      const cs = S.opts.choices[d.gk] || [];
+      if (cs.includes(z.dataset.out)) S.opts.choices[d.gk] = cs.filter(c => c !== z.dataset.out);
+      select(d.gk, d.code);
+    }
+    tryChange({ type: 'swapIn', code: d.code, out: z.dataset.out, term }, prev);
+  });
+
   document.addEventListener('toggle', e => {
     const k = e.target.matches && e.target.matches('details.alts[data-key]') && e.target.dataset.key;
     if (k) S.altOpen[k] = e.target.open;
