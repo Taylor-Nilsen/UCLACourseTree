@@ -25,6 +25,9 @@ jobs:
           cp index.html parser.js model.js ui.js export.js _site/
           cp -r data _site/
           cp sample/dars-lines.js _site/sample/
+          # Version the local script URLs per deploy: Pages caches .js for 4 hours but index.html for 10 minutes, so without
+          # this a browser can run a new index.html with an old ui.js and break.
+          sed -i -E 's#<script src="([^":]+\.js)">#<script src="\1?v=${{ github.sha }}">#' _site/index.html
       # Pages must be enabled once in Settings > Pages (Source: GitHub Actions); GITHUB_TOKEN cannot enable it.
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
