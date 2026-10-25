@@ -70,7 +70,7 @@ Under each class are up to 3 alternates for if you can't get it, best on top. Ea
 3. Options for requirements you haven't selected yet.
 4. A GE slot planned for later.
 
-Each class lists at most one option per requirement, and a course already shown under a more important class only repeats when nothing else fits. Click an alternate to see its prerequisites or its requirement's options. » on a class defers it, and the planner then moves up the course listed first under it (unless that one is a same-requirement option).
+Each class lists at most one option per requirement, and a course already shown under a more important class only repeats when nothing else fits. Click an alternate to see its prerequisites or its requirement's options. » on a class defers it to the next quarter it is offered, and the planner refills the seat itself (same as » in the Quarter plan).
 
 ## Export
 
