@@ -44,6 +44,7 @@ button, input { font: inherit; color: inherit; }
 .btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
 .btn.sm { padding: 3px 8px; font-size: 12px; }
 .ctl { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.ctl select { padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); font: inherit; }
 .ctl input[type=number] { width: 52px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); }
 #busy { font-size: 13px; color: var(--muted); }
 
@@ -193,6 +194,19 @@ button, input { font: inherit; color: inherit; }
 .crit-t { color: var(--block); font-weight: 700; }
 .node .crit { fill: var(--block); font-size: 28px; font-weight: 800; }
 .plan { padding-top: 6px; }
+.next { display: flex; gap: 10px; overflow-x: auto; padding: 6px 0 8px; align-items: flex-start; }
+.ncol { flex: 0 0 220px; min-width: 0; }
+.nrank { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; margin-bottom: 4px; }
+.ntop .pchip { border-width: 1.5px; border-left-width: 4px; }
+.nwhy { display: block; font-size: 12px; color: var(--muted); margin: -2px 0 8px; }
+.nalt-h { font-size: 11px; color: var(--muted); margin: 4px 0 4px; }
+.nalt { display: block; padding: 5px 8px; margin-bottom: 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); font-size: 12px; color: inherit; text-decoration: none; }
+.nalt:hover, .nalt:focus-visible { border-color: var(--accent); outline: none; }
+.nalt span { display: block; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nalt small { display: block; color: var(--muted); }
+.ntop .pchip span { white-space: normal; }
+.term.over, .ntop.over { outline: 2px dashed var(--accent); outline-offset: 2px; }
+[draggable=true] { cursor: grab; }
 .cfstatus { margin: 0 0 8px; padding: 6px 10px; border-radius: 8px; background: var(--ip-bg); font-size: 13px; }
 .constraints { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; margin-bottom: 10px; }
 .constraints h3 { font-size: 13px; margin: 2px 0 4px; }
@@ -264,6 +278,7 @@ button, input { font: inherit; color: inherit; }
       <div class="tabs" role="tablist">
         <button role="tab" data-tab="tree" aria-selected="true">Tree</button>
         <button role="tab" data-tab="plan" aria-selected="false">Quarter plan</button>
+        <button role="tab" data-tab="next" aria-selected="false">What to take next</button>
       </div>
       <section id="tree-view">
         <div class="zoom"><button data-zoom="-1" aria-label="Zoom out">−</button><span id="zoomv">100%</span><button data-zoom="1" aria-label="Zoom in">+</button></div>
@@ -274,10 +289,16 @@ button, input { font: inherit; color: inherit; }
         </div>
       </section>
       <section id="plan-view" hidden>
-        <p class="small muted">Hover a class for » (defer it a quarter) and ≠ (mark a time conflict with another class that quarter). <span class="crit-t">*</span> must be taken that quarter.</p>
+        <p class="small muted">Drag a class to another quarter to move it there. Hover a class for » (defer it a quarter) and ≠ (mark a time conflict with another class that quarter). <span class="crit-t">*</span> must be taken that quarter.</p>
         <div id="constraints" class="constraints" hidden></div>
-        <p id="cfstatus" class="cfstatus" role="status" aria-live="polite" hidden></p>
+        <p class="cfstatus" role="status" aria-live="polite" hidden></p>
         <div id="plan" class="plan"></div>
+      </section>
+      <section id="next-view" hidden>
+        <label class="ctl">Quarter <select id="nextterm"></select></label>
+        <p class="small muted">Your best classes for that quarter, most important on the left. Under each: what to take instead if you can't get it, best first. Drag one onto a class at the top to take it instead. Hover a class for » (defer it) and ≠ (mark a time conflict). <span class="crit-t">*</span> must be taken that quarter.</p>
+        <p class="cfstatus" role="status" aria-live="polite" hidden></p>
+        <div id="next" class="next"></div>
       </section>
     </main>
   </div>
@@ -288,7 +309,7 @@ button, input { font: inherit; color: inherit; }
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-t" aria-describedby="modal-b">
     <h2 id="modal-t">This change causes scheduling problems</h2>
     <div id="modal-b"></div>
-    <div class="modal-btns"><button type="button" class="btn primary" data-modal="undo">Undo</button><button type="button" class="btn" data-modal="continue">Continue anyway</button></div>
+    <div class="modal-btns" id="modal-btns"><button type="button" class="btn primary" data-modal="undo">Undo</button><button type="button" class="btn" data-modal="continue">Continue anyway</button></div>
   </div>
 </div>
 

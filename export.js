@@ -247,7 +247,7 @@ ${trees}
     const parsed = Array.isArray(lines) && lines.length && window.DARS ? DARS.parse(lines) : null;
     if (!parsed || !parsed.ok) return alert('Load an audit first.');
     let html;
-    try { html = buildDocument(MODEL.build(parsed, { choices: opts.choices || {}, defers: opts.defers || {}, conflicts: opts.conflicts || [], perQuarter: opts.perQuarter || 4, useSummer: !!opts.useSummer }), parsed); }
+    try { html = buildDocument(MODEL.build(parsed, { choices: opts.choices || {}, defers: opts.defers || {}, pins: opts.pins || {}, conflicts: opts.conflicts || [], perQuarter: opts.perQuarter || 4, useSummer: !!opts.useSummer }), parsed); }
     catch (e) { console.error(e); return alert('Could not build the export: ' + e.message); }
     const w = window.open('', '_blank');
     if (!w) return alert('Allow pop-ups for this page to export.');
