@@ -404,4 +404,38 @@ t('samples: a full build with criticality stays fast; critical courses carry a r
     for (const x of pl) { assert.ok(x.slack >= 0 && x.slack <= 4); if (x.critical) assert.ok(x.criticalWhy, x.code); }
   }
 });
+t('nextQuarter: default term, importance order, alternates that can really be taken that quarter', () => {
+  for (const f of ['dars-lines.json', 'dars-lines-2.json']) {
+    const p = DARS.parse(JSON.parse(readFileSync(new URL('../sample/' + f, import.meta.url), 'utf8'))), mm = MODEL.build(p, { perQuarter: 4 });
+    const nd = new Map(mm.nodes.map(x => [x.code, x]));
+    assert.equal(MODEL.nextQuarter(mm).term, mm.plan[0].term); assert.equal(MODEL.nextQuarter(mm, 'nope').term, mm.plan[0].term);
+    for (const pl of mm.plan) {
+      const r = MODEL.nextQuarter(mm, pl.term), T = DARS.termIndex(pl.term), q = 'FWSU'[T % 4];
+      assert.equal(r.term, pl.term); assert.deepEqual(r.picks.map(x => x.code).sort(), pl.courses.slice().sort());
+      const real = r.picks.filter(x => !x.slot).map(x => nd.get(x.code));
+      assert.ok(r.picks.findIndex(x => x.slot) === -1 || r.picks.slice(r.picks.findIndex(x => x.slot)).every(x => x.slot), 'slots last');
+      for (let i = 1; i < real.length; i++) assert.ok(!!real[i - 1].critical > !!real[i].critical || (!!real[i - 1].critical === !!real[i].critical && real[i - 1].slack <= real[i].slack), pl.term + ' ' + real[i].code);
+      const have = c => ['done', 'ip'].includes((nd.get(c) || {}).status) || (nd.get(c) && nd.get(c).planned && DARS.termIndex(nd.get(c).planned) < T);
+      for (const x of r.picks) {
+        assert.ok(x.alts.length <= 3); assert.equal(new Set(x.alts.map(a => a.code)).size, x.alts.length);
+        for (const a of x.alts) {
+          assert.ok(!pl.courses.includes(a.code), a.code); assert.ok(a.why);
+          if (a.code.startsWith('GE: ')) continue;
+          const k = COURSES[a.code]; assert.ok(k.off === '?' || k.off.includes(q), `${a.code} offered ${k.off}, ${pl.term}`);
+          for (const og of k.pre) assert.ok(og.some(have), `${a.code} in ${pl.term}: ${og}`);
+        }
+      }
+    }
+  }
+});
+t('nextQuarter: a selected course lists its unselected siblings first', () => {
+  const p = synth([['PICK', 1, [zz('ZZ 10'), zz('ZZ 11'), zz('ZZ 12')]], ['REQ', 2, [zz('ZZ 13'), zz('ZZ 14')]]]);
+  const key = MODEL.build(p, {}).groups[0].key, mm = MODEL.build(p, { perQuarter: 3, choices: { [key]: ['ZZ 10'] } });
+  const x = MODEL.nextQuarter(mm, 'WI27').picks.find(x => x.code === 'ZZ 10');
+  assert.deepEqual(x.alts.map(a => [a.code, a.groupKey, a.same]), [['ZZ 11', key, true], ['ZZ 12', key, true]]);
+  const open = MODEL.build(p, { perQuarter: 3 }), slot = MODEL.nextQuarter(open).picks.find(x => x.slot);
+  assert.deepEqual(slot.alts.map(a => [a.code, a.groupKey]), [['ZZ 10', key], ['ZZ 11', key], ['ZZ 12', key]]);
+  const deferred = MODEL.build(p, { perQuarter: 3, choices: { [key]: ['ZZ 10'] }, defers: { 'ZZ 14': 'SP27' } });
+  assert.ok(!MODEL.nextQuarter(deferred, 'WI27', { defers: { 'ZZ 14': 'SP27' } }).picks.some(x => x.alts.some(a => a.code === 'ZZ 14')));
+});
 console.log(n + ' passed');

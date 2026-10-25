@@ -84,7 +84,7 @@
     const parsed = DARS.parse(lines); // never throws; ok:false carries a reason
     S.diag = { parsed, lines };
     if (!parsed.ok) { showError(parsed.reason); $('#error').insertAdjacentHTML('beforeend', ' ' + DIAG); return; }
-    if (fresh) { S.opts.choices = {}; S.opts.defers = {}; S.opts.conflicts = []; S.detail = null; S.conflictFrom = null; }
+    if (fresh) { S.opts.choices = {}; S.opts.defers = {}; S.opts.conflicts = []; S.detail = null; S.conflictFrom = null; S.nextTerm = null; }
     S.parsed = parsed;
     store.set('dars.lines', lines); saveOpts();
     rebuild();
@@ -260,8 +260,8 @@
 
   function renderTabs() {
     document.querySelectorAll('[data-tab]').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === S.tab));
-    $('#tree-view').hidden = S.tab !== 'tree'; $('#plan-view').hidden = S.tab !== 'plan';
-    renderTree(); renderPlan();
+    $('#tree-view').hidden = S.tab !== 'tree'; $('#plan-view').hidden = S.tab !== 'plan'; $('#next-view').hidden = S.tab !== 'next';
+    renderTree(); renderPlan(); renderNext();
   }
 
   // Layers come from TREE_LAYOUT (path cards fold in their paths' courses); rows ordered by barycenter of predecessors
@@ -436,6 +436,25 @@
       ${t.beyondExpected ? '<span class="tag-late">past expected graduation</span>' : ''}
       ${t.courses.map(c => chipFor(c, t.term)).join('') || '<p class="muted small">No courses</p>'}
     </div>`).join('') || '<p class="muted pad">Nothing left to plan.</p>';
+  }
+
+  // "What to take next": one column per class of the chosen quarter (most important left), alternates under it (best on top).
+  // » defers a class (the planner then moves the next course in line up); an alternate opens its course or its options panel.
+  function renderNext() {
+    const r = MODEL.nextQuarter(S.model, S.nextTerm, { defers: S.opts.defers }), nm = nodeMap();
+    $('#nextterm').innerHTML = r.terms.map(t => `<option value="${esc(t)}"${t === r.term ? ' selected' : ''}>${esc(t)}${t === r.terms[0] ? ' (next)' : ''}</option>`).join('');
+    const alt = a => {
+      const open = nm[a.code] ? `data-node="${esc(a.code)}"` : a.groupKey ? `data-group="${esc(a.groupKey)}"` : '';
+      return `<a href="#" class="nalt" ${open}><b>${esc(a.code)}</b><span>${esc(a.title)}</span><small>${esc(a.why)}</small></a>`;
+    };
+    $('#next').innerHTML = r.picks.map((x, i) => {
+      const n = nm[x.code] || {}, crit = x.critical ? `<span class="crit" role="img" aria-label="Must be taken this quarter" title="Must be taken this quarter">*</span>` : '';
+      const top = x.code.startsWith('CHOOSE: ')
+        ? `<button class="pchip choose" ${n.pathChoiceKey ? `data-path="${esc(n.pathChoiceKey)}"` : `data-group="${esc(n.groupKey)}"`}><b>choose: ${esc(n.title)}</b><small>${esc(x.units)} u</small></button>`
+        : `<div class="pwrap">${crit}<button class="pchip s-${esc(n.status || '')}" data-node="${esc(x.code)}"><b>${esc(x.code)}</b><span>${esc(x.title)}</span><small>${esc(x.units)} u</small></button>${x.slot ? '' : `<span class="pacts"><button type="button" class="pact" data-defer="${esc(x.code)}" aria-label="Can't take ${esc(x.code)}: defer it to the next quarter it is offered" title="Can't take it: defer to the next quarter it is offered">»</button></span>`}</div>`;
+      return `<div class="ncol"><div class="nrank">#${i + 1}${i || x.slot ? '' : ' most important'}</div><div class="ntop">${top}</div><span class="nwhy">${esc(x.why)}</span>
+        ${x.alts.length ? `<div class="nalt-h">If you can't take it:</div>${x.alts.map(alt).join('')}` : x.slot ? '' : '<div class="nalt-h">Nothing else can be taken this quarter in its place.</div>'}</div>`;
+    }).join('') || '<p class="muted pad">Nothing left to plan.</p>';
   }
 
   // "Your scheduling constraints": each defer and conflict (with the model's reason) and a × that removes it
@@ -672,6 +691,7 @@
   document.addEventListener('change', async e => {
     const t = e.target;
     if (t.id === 'pq') { S.opts.perQuarter = Math.min(6, Math.max(3, parseInt(t.value, 10) || 4)); t.value = S.opts.perQuarter; if (S.parsed) commit(); else saveOpts(); return; }
+    if (t.id === 'nextterm') { S.nextTerm = t.value; return renderNext(); }
     if (t.id === 'summer') { S.opts.useSummer = t.checked; if (S.parsed) commit(); else saveOpts(); return; }
     if (t.matches('input[type=file]') && t.files[0]) {
       const f = t.files[0]; t.value = '';

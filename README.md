@@ -55,6 +55,23 @@ A red asterisk in a class's upper-left corner means you need to take it that qua
 
 Small changes apply at once with an Undo button. If a change pushes back graduation, pushes a course past your expected graduation, leaves a course unschedulable, or moves 3 or more other courses, a dialog lists what moves and lets you undo or continue. Constraints are saved in your browser and cleared when you load a new audit.
 
+## What to take next
+
+The "What to take next" tab is for course selection. Pick a quarter (it defaults to the next one) and it shows that quarter's planned classes, ranked most important on the left:
+
+1. Classes you must take that quarter (red asterisk) first.
+2. Then the ones with the least room to slip (fewest offered quarters they can move before graduation is pushed back).
+3. Then the ones that unlock the most later courses.
+
+Under each class are up to 3 alternates for if you can't get it, best on top. Each one can actually be taken that quarter: it is offered then, and its prerequisites are done, in progress or planned earlier. The order is:
+
+1. Other options for the same requirement, when you selected that class from a list.
+2. Courses planned for a later quarter that could move up, in the planner's own priority order.
+3. Options for requirements you haven't selected yet.
+4. A GE slot planned for later.
+
+Each class lists at most one option per requirement, and a course already shown under a more important class only repeats when nothing else fits. Click an alternate to see its prerequisites or its requirement's options. » on a class defers it, and the planner then moves up the course listed first under it (unless that one is a same-requirement option).
+
 ## Export
 
 Export opens a print-ready plan and prerequisite tree (with your constraints applied; a * marks classes that must be taken that quarter); save it as PDF from the print dialog.

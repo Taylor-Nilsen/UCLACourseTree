@@ -374,6 +374,7 @@
       if (n.critical) n.criticalWhy = why;
     }
     for (const [c, t] of cur.at) nodes.get(c).planned = DARS.termName(t);
+    order.forEach((n, i) => { n.priority = i; n.unlocks = unlocks(n.code); });
     const plan = cur.plan.map(({ t, picks }) => ({ term: DARS.termName(t), courses: picks.map(n => n.code), units: picks.reduce((u, n) => u + n.units, 0), beyondExpected: t > exp }));
     if (cur.left.length) warnings.push(`Stopped planning after 16 quarters; still unscheduled: ${cur.left.map(n => n.code).join(', ')}.`);
 
@@ -414,5 +415,59 @@
     const severity = later || pastExpected.length || unschedulable.length || others >= 3 ? 'major' : others ? 'minor' : 'none';
     return { before, after, opts: o, diff: { finalTermBefore, finalTermAfter, pastExpected, moved, unschedulable, severity } };
   }
-  g.MODEL = { build, previewChange };
+  // "What to take next" (pure, on a built model): `term`'s planned courses (default: the first planned quarter), most important
+  // first, each with up to 3 alternates, best first. Importance: must take now (critical), then least slack, then most later
+  // courses unlocked, then scheduler priority; GE:/CHOOSE: slots last. Alternates: other options of the same requirement
+  // (a course selected in a select-N-of-M group, or a CHOOSE slot's group), then later-planned courses that could move up (in
+  // scheduler order), options of open select-N-of-M groups and later GE slots, at most one per requirement per class, preferring
+  // ones not already listed under a more important class. A course qualifies when it is offered
+  // that quarter, every prereq group has a course done, in progress or planned earlier, it is not deferred past that term
+  // (opts.defers) and a conflict did not move it out of that term.
+  function nextQuarter(model, term, opts = {}) {
+    const terms = model.plan.map(p => p.term), T = terms.includes(term) ? term : terms[0];
+    if (!T) return { term: null, terms, picks: [] };
+    const ti = DARS.termIndex(T), q = 'FWSU'[((ti % 4) + 4) % 4], defers = opts.defers || {};
+    const nm = new Map(model.nodes.map(n => [n.code, n])), at = n => n.planned ? DARS.termIndex(n.planned) : null;
+    const have = new Set(model.nodes.filter(n => n.status === 'done' || n.status === 'ip' || at(n) < ti && at(n) != null).map(n => n.code));
+    const moved = new Set((model.conflictResolutions || []).filter(r => r.term === T && r.moved).map(r => r.moved));
+    const can = c => {
+      const k = COURSES[c], n = nm.get(c), off = k ? k.off : n ? n.offered : '';
+      return !have.has(c) && !(n && n.planned === T) && (off === '?' || off.includes(q)) && !moved.has(c) &&
+        !(defers[c] && DARS.termIndex(defers[c]) > ti) && (k ? k.pre : n ? n.prereqs : []).every(grp => grp.some(x => have.has(x)));
+    };
+    const titleOf = c => (nm.get(c) || {}).title || (COURSES[c] || {}).t || c;
+    const groupOf = k => model.groups.find(g => g.key === k);
+    const isSlot = c => /^(GE|CHOOSE): /.test(c);
+    const real = (model.plan.find(p => p.term === T).courses).map(c => nm.get(c));
+    const ranked = real.filter(n => !isSlot(n.code)).sort((a, b) => !!b.critical - !!a.critical || a.slack - b.slack || b.unlocks - a.unlocks || a.priority - b.priority)
+      .concat(real.filter(n => isSlot(n.code)));
+    const unl = n => n.unlocks ? `unlocks ${plural(n.unlocks, 'later course')}` : '';
+    // pool for "if you can't take it", best first: later courses that can move up, options of open select-N-of-M groups, later GE slots
+    const pool = model.nodes.filter(n => at(n) > ti && !isSlot(n.code) && can(n.code)).sort((a, b) => a.priority - b.priority)
+      .map(b => ({ code: b.code, title: b.title, why: ['planned for ' + b.planned, unl(b)].filter(Boolean).join('; '), groupKey: null, same: false }))
+      .concat(model.groups.filter(g => g.choice && g.undecided && g.selected !== false).flatMap(g => g.alternatives.filter(a => can(a.code))
+        .map(a => ({ code: a.code, title: titleOf(a.code), why: 'option for ' + g.name.toLowerCase(), groupKey: g.key, same: false }))))
+      .concat(model.nodes.filter(n => at(n) > ti && n.code.startsWith('GE: '))
+        .map(n => ({ code: n.code, title: n.title, why: 'any approved course; moves up the slot planned for ' + n.planned, groupKey: null, same: false })));
+    const used = new Map();
+    const picks = ranked.map(n => {
+      const slot = isSlot(n.code), g = groupOf(slot ? !n.pathChoiceKey && n.code.startsWith('CHOOSE: ') && n.groupKey : n.pickedFor);
+      const alts = (g && g.choice ? g.alternatives : []).filter(a => can(a.code)).slice(0, 3)
+        .map(a => ({ code: a.code, title: titleOf(a.code), why: 'same requirement: ' + g.name.toLowerCase(), groupKey: g.key, same: true }));
+      // one pool entry per requirement per column, so a long elective list doesn't fill it
+      if (!slot) for (const b of pool.slice().sort((x, y) => (used.get(x.code) || 0) - (used.get(y.code) || 0))) {
+        if (alts.length >= 3) break;
+        if (alts.some(a => a.code === b.code || b.groupKey && a.groupKey === b.groupKey)) continue;
+        used.set(b.code, (used.get(b.code) || 0) + 1);
+        alts.push(b);
+      }
+      const rank = a => a.same ? -1 : pool.indexOf(a); // same requirement first, then pool order: best on top
+      alts.sort((a, b) => rank(a) - rank(b));
+      const why = slot ? (n.code.startsWith('GE: ') ? 'any approved course from the list' : 'decision pending: select a course')
+        : [n.critical ? 'must take now: delaying it pushes back ' + n.criticalWhy : `can slip ${n.slack}${n.slack >= 4 ? '+' : ''} offered quarter${n.slack === 1 ? '' : 's'}`, unl(n)].filter(Boolean).join('; ');
+      return { code: n.code, title: n.title, units: n.units, critical: !!n.critical, slot, why, alts };
+    });
+    return { term: T, terms, picks };
+  }
+  g.MODEL = { build, previewChange, nextQuarter };
 })(typeof module !== 'undefined' ? module.exports : window);
