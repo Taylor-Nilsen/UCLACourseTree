@@ -222,4 +222,26 @@ t('fuzz: 500 mutations never throw; mild ones keep every requirement group', () 
   }
   assert.equal(mild, 300);
 });
+t('real L&S transfer audit (redacted): every open requirement is read, nothing left unparsed', () => {
+  const R = DARS.parse(JSON.parse(readFileSync(new URL('./fixtures/real-ls-environmental-science-transfer.json', import.meta.url), 'utf8')));
+  assert.equal(R.ok, true); assert.deepEqual(R.unparsed, []);
+  assert.equal(R.unitsNeeded, 52); assert.equal(R.upperUnitsNeeded, 47); assert.equal(R.notices.length, 1);
+  assert.equal(R.taken['ENVIRON 185A'].status, 'ip'); // grade IPPN
+  const got = R.sections.flatMap(s => s.groups.filter(g => g.options.length).map(g => [s.title, g.name, g.needCourses, g.options.length]));
+  assert.deepEqual(got, [
+    ['AMERICAN HISTORY AND INSTITUTIONS', 'AMERICAN HISTORY AND INSTITUTIONS', 1, 79], // header right after a units-only section
+    ['L&S DIVERSITY', 'L&S DIVERSITY COURSE REQUIRED', 1, 437],                        // "[PERSPCTV-US COLLEGE]" notes in the list
+    ['WRITING II', 'WRITING II', 1, 134],
+    ['SCHOOL | COLLEGE FOREIGN LANGUAGE REQUIREMENT', 'FOREIGN LANGUAGE COURSE (LEVEL 3 OR HIGHER) REQUIRED', 1, 316], // "NEEDS: 1 Set / Course"
+    ['FOUNDATIONS OF THE ARTS AND HUMANITIES', 'ONE LITERARY & CULTURAL ANALYSIS COURSE', 1, 238], // SELECT FROM with no NEEDS line
+    ['FOUNDATIONS OF SOCIETY AND CULTURE', 'ONE HISTORICAL ANALYSIS COURSE', 1, 169],
+    ['FOUNDATIONS OF SOCIETY AND CULTURE', 'ONE SOCIAL ANALYSIS COURSE', 1, 164],
+    ['FOUNDATIONS OF SOCIETY AND CULTURE', 'ADDITIONAL COURSE FROM HISTORICAL OR SOCIAL ANALYSIS', 1, 333], // "**HISTORICAL**" markers
+    ['PREPARATION FOR THE MAJOR', 'ENVIRONMENT 10 AND GEOGRAPHY 7', 1, 1],
+    ['REQUIREMENTS FOR THE MAJOR', 'ENVIRONMENT 175', 1, 1],
+    ['REQUIREMENTS FOR THE MAJOR', 'FOUR ADDITIONAL PHYSICAL AND LIFE SCIENCE COURSES', 3, 48], // "ATMOS&OCEANIC : A&O SCI 101" labels
+    ['SOCIAL SCIENCES / HUMANITIES REQUIREMENTS', 'TWO UPPER DIVISION COURSES', 1, 32],
+    ['PRACTICUM / SUSTAINABILITY TALKS REQUIREMENTS', 'ENVIRONMENT 180A, 180B, 180C', 3, 3],
+  ]);
+});
 console.log(n + ' passed');

@@ -1,4 +1,4 @@
-# Parser fixtures (SYNTHETIC)
+# Parser fixtures (SYNTHETIC, plus one redacted real audit)
 
 Every file here is a **synthetic** UCLA DARS audit written by hand for tests. None is a real student's audit.
 They copy the layout of the two real audits in `sample/` (header block, program table, section / group / data /
@@ -29,3 +29,10 @@ and page chrome, like `sample/dars-lines-2.json`) and `narrow` (smaller margins)
 
 Expected parse results for every file are in `test/parser.test.mjs` (`FIX`). When a real audit shows a shape these
 fixtures get wrong, add the real (redacted) lines as a new fixture rather than editing these to match.
+
+`real-ls-environmental-science-transfer.json` is the exception: a real Letters & Science transfer audit (Environmental Science BS,
+Fall 2026 catalog), passed through `DARS.redact` with school names and the audit id replaced. It carries the shapes the synthetic
+files got wrong: a section header right after a units-only section, GE sub-groups with a `SELECT FROM` and no `NEEDS` line,
+`NEEDS: 1 Set / Course`, `[NOTE]` and `**HISTORICAL**` markers and `DEPARTMENT : ` labels inside course lists, the `IPPN` grade,
+section-level unit needs (`MINIMUM 180 UNITS`, `UPPER DIVISION REQUIREMENT`), classes enrolled for a later quarter, and a
+`CONCENTRATION DECLARATION REQUIRED` notice.

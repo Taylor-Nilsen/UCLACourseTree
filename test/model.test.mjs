@@ -453,4 +453,21 @@ t('pins: move a course to a quarter, swap one in, refuse quarters it is not offe
   assert.deepEqual(MODEL.previewChange(three, mv.opts, { type: 'unmove', code: 'ZZ 12' }).opts.pins, {});
   assert.deepEqual(MODEL.previewChange(three, mv.opts, { type: 'defer', code: 'ZZ 12' }).opts.pins, {}); // a defer replaces the move
 });
+t('real L&S transfer audit: substitutions, classes enrolled ahead, GE slots list what a quarter offers, a selection lands there', () => {
+  const R = DARS.parse(JSON.parse(readFileSync(new URL('./fixtures/real-ls-environmental-science-transfer.json', import.meta.url), 'utf8')));
+  const opts = { choices: {}, defers: {}, pins: {}, conflicts: [], perQuarter: 4 }, mo = MODEL.build(R, opts);
+  const planned = mo.plan.flatMap(p => p.courses);
+  assert.ok(!planned.includes('STATS 12')); // the audit took transfer STATS 10 for "STATISTICS 12, 13, OR LIFE SCIENCE 40"
+  assert.ok(planned.includes('ENVIRON 175')); assert.ok(mo.nodes.some(n => n.code === 'STATS 10' && n.status === 'done'));
+  assert.equal(mo.plan[0].term, 'WI27'); assert.deepEqual(mo.plan[0].enrolled, ['GEOG 7', 'LIFESCI 7C']); assert.equal(mo.plan[0].courses.length, 2);
+  assert.equal(mo.warnings.length, 2); assert.match(mo.warnings[0], /^CONCENTRATION DECLARATION REQUIRED/); assert.match(mo.warnings[1], /47 more upper-division units/);
+  const slot = MODEL.nextQuarter(mo, 'SP27', opts).picks.find(x => x.code === 'GE: WRITING II');
+  assert.ok(slot.options.length > 5 && slot.options.every(o => COURSES[o.code].off.includes('S')));
+  const pick = slot.options[0].code, after = MODEL.build(R, { ...opts, choices: { [slot.groupKey]: [pick] }, pins: { [pick]: 'SP27' } });
+  assert.ok(after.plan.find(p => p.term === 'SP27').courses.includes(pick)); assert.ok(!after.nodes.some(n => n.code === 'GE: WRITING II'));
+  // a diversity course selected for a GE area counts for diversity too
+  const ha = mo.groups.find(g => g.name === 'ONE HISTORICAL ANALYSIS COURSE'), dv = mo.groups.find(g => g.section === 'L&S DIVERSITY');
+  const both = ha.options.find(c => dv.options.includes(c)), dbl = MODEL.build(R, { ...opts, choices: { [ha.key]: [both] } });
+  assert.deepEqual(dbl.groups.find(g => g.key === dv.key).chosen.map(c => c.code), [both]);
+});
 console.log(n + ' passed');
