@@ -199,16 +199,23 @@
     b.parentElement.hidden = true;
   });
 
-  function optRow(key, code, why, act, cls, ready) {
+  function optRow(key, code, why, act, cls, ready, term) {
     const dot = ready === undefined ? '' : `<i class="dot ${ready ? 'ok' : ''}" title="${ready ? 'prereqs met' : 'prereqs missing'}"></i>`;
-    return `<button class="opt ${cls || ''}" data-act="${act}" data-key="${esc(key)}" data-code="${esc(code)}" title="${act === 'unselect' ? 'Click to unselect' : 'Click to select'}">` +
+    return `<button class="opt ${cls || ''}" data-act="${act}" data-key="${esc(key)}" data-code="${esc(code)}"${term ? ` data-term="${esc(term)}"` : ''} title="${act === 'unselect' ? 'Click to unselect' : term ? 'Click to select and plan it for ' + term : 'Click to select'}">` +
       `${act === 'unselect' ? PIN : dot}<b>${esc(code)}</b>${why ? ` <small title="${esc(why)}">${esc(why)}</small>` : ''}</button>`;
   }
 
+  // "Title · F/W" for a long-list option: what it is and the quarters it runs
+  const optInfo = c => { const k = course(c); return !k ? 'not in course database' : k.t + (k.off === '' ? ' · not offered recently' : k.off === '?' ? '' : ' · ' + k.off.split('').join('/')); };
+  // courses on a slot's list that can be taken in `term`; selecting one plans it for that quarter
+  const termOptions = (x, term) => !x || !x.options.length ? '' : `<details class="alts" open><summary>${x.options.length} course${x.options.length === 1 ? '' : 's'} you could take in ${esc(term)}</summary><div class="optlist tall">` +
+    x.options.slice(0, 200).map(o => optRow(x.groupKey, o.code, `${o.title} · ${o.units} u`, 'select', '', undefined, term)).join('') +
+    (x.options.length > 200 ? `<p class="muted small">Showing 200 of ${x.options.length}. Open the slot to filter the full list.</p>` : '') + '</div></details>';
+  const enrolledChips = (t, nm) => (t.enrolled || []).map(c => `<button class="pchip s-ip" data-node="${esc(c)}" title="Already enrolled for ${esc(t.term)}"><b>${esc(c)}</b><span>${esc(titleOf(c, nm))}</span><small>${esc((nm[c] || {}).units ?? '')} u · enrolled</small></button>`).join('');
   function optionList(g) {
     const q = (S.filters[g.key] || '').trim().toUpperCase(), pinned = S.opts.choices[g.key] || [];
-    const hits = (g.options || []).filter(c => !q || c.includes(q));
-    return hits.slice(0, 150).map(c => optRow(g.key, c, '', pinned.includes(c) ? 'unselect' : 'select', pinned.includes(c) ? 'on' : '')).join('') +
+    const hits = (g.options || []).filter(c => !q || c.includes(q) || ((course(c) || {}).t || '').toUpperCase().includes(q));
+    return hits.slice(0, 150).map(c => optRow(g.key, c, optInfo(c), pinned.includes(c) ? 'unselect' : 'select', pinned.includes(c) ? 'on' : '')).join('') +
       (hits.length > 150 ? `<p class="muted small">Showing 150 of ${hits.length}. Type to narrow.</p>` : hits.length ? '' : '<p class="muted small">No matches.</p>');
   }
 
@@ -427,9 +434,9 @@
     renderCfStatus();
     renderConstraints();
     $('#plan').innerHTML = (S.model.plan || []).map(t => `<div class="term${t.beyondExpected ? ' late' : ''}" data-drop="plan" data-term="${esc(t.term)}">
-      <div class="term-h"><b>${esc(t.term)}</b><span>${esc(t.units)} units</span></div>
+      <div class="term-h"><b>${esc(t.term)}</b><span>${esc(t.units + (t.enrolled || []).reduce((u, c) => u + ((nm[c] || {}).units || 0), 0))} units</span></div>
       ${t.beyondExpected ? '<span class="tag-late">past expected graduation</span>' : ''}
-      ${t.courses.map(c => chipFor(c, t.term)).join('') || '<p class="muted small">No courses</p>'}
+      ${enrolledChips(t, nm)}${t.courses.map(c => chipFor(c, t.term)).join('') || '<p class="muted small">No courses</p>'}
     </div>`).join('') || '<p class="muted pad">Nothing left to plan.</p>';
   }
 
@@ -458,13 +465,14 @@
       const open = nm[a.code] ? `data-node="${esc(a.code)}"` : a.groupKey ? `data-group="${esc(a.groupKey)}"` : '';
       return `<a href="#" class="nalt" draggable="true" data-drag="${esc(a.code)}"${a.groupKey && !nm[a.code] ? ` data-gk="${esc(a.groupKey)}"` : ''} ${open}><b>${esc(a.code)}</b><span>${esc(a.title)}</span><small>${esc(a.why)}</small></a>`;
     };
-    $('#next').innerHTML = r.picks.map((x, i) => {
+    const pt = (S.model.plan || []).find(t => t.term === r.term) || {};
+    $('#next').innerHTML = ((pt.enrolled || []).length ? `<div class="ncol"><div class="nrank">already enrolled</div>${enrolledChips(pt, nm)}</div>` : '') + r.picks.map((x, i) => {
       const n = nm[x.code] || {};
       const top = x.code.startsWith('CHOOSE: ')
         ? `<button class="pchip choose" ${n.pathChoiceKey ? `data-path="${esc(n.pathChoiceKey)}"` : `data-group="${esc(n.groupKey)}"`}><b>choose: ${esc(n.title)}</b><small>${esc(x.units)} u</small></button>`
         : courseChip(x.code, r.term, nm, '');
       return `<div class="ncol"><div class="nrank">#${i + 1}${i || x.slot ? '' : ' most important'}</div><div class="ntop" data-drop="next" data-out="${esc(x.code)}" data-term="${esc(r.term)}">${top}</div><span class="nwhy">${esc(x.why)}</span>
-        ${x.alts.length ? `<div class="nalt-h">If you can't take it:</div>${x.alts.map(alt).join('')}` : x.slot ? '' : '<div class="nalt-h">Nothing else can be taken this quarter in its place.</div>'}</div>`;
+        ${termOptions(x, r.term)}${x.alts.length ? `<div class="nalt-h">If you can't take it:</div>${x.alts.map(alt).join('')}` : x.slot ? '' : '<div class="nalt-h">Nothing else can be taken this quarter in its place.</div>'}</div>`;
     }).join('') || '<p class="muted pad">Nothing left to plan.</p>';
   }
 
@@ -617,7 +625,9 @@
       ${g && !g.placeholder && (g.choice || (g.altGroupKeys || []).length) ? `<p><a href="#" data-group="${esc(g.key)}">All options for this requirement</a></p>` : ''}
       <h3>Prerequisites</h3>${pre ? `<ul class="prelist">${pre}</ul>` : '<p class="muted">None</p>'}
       ${n.pathPrereq ? '<p class="muted small">Only an option you have not selected yet needs this, so it is not in the plan.</p>' : ''}
-      ${n.status === 'placeholder' ? '<p class="muted small">Select a specific course for this slot in the requirements panel.</p>' : ''}
+      ${n.status === 'placeholder' && g && g.placeholder ? `<h3>Select a course</h3>${n.planned ? termOptions(MODEL.nextQuarter(S.model, n.planned, { defers: S.opts.defers }).picks.find(x => x.code === n.code), n.planned) : ''}
+        <p class="small muted">All ${esc(g.optionCount)} options (code or title):</p><input type="search" class="filter" data-filter="${esc(g.key)}" placeholder="Filter options" value="${esc(S.filters[g.key] || '')}">
+        <div class="optlist tall" data-list="${esc(g.key)}">${optionList(g)}</div>` : n.status === 'placeholder' ? '<p class="muted small">Select a specific course for this slot in the requirements panel.</p>' : ''}
       ${n.req ? `<h3>Catalog requisites</h3><p>${esc(n.req)}</p>` : ''}`;
     d.hidden = false;
   }
@@ -666,6 +676,7 @@
   function unpin(key, code) {
     const a = (S.opts.choices[key] || []).filter(c => c !== code);
     if (a.length) S.opts.choices[key] = a; else delete S.opts.choices[key];
+    if (S.opts.pins) delete S.opts.pins[code]; // it leaves the plan, so its move goes with it
     commit();
   }
 
@@ -703,7 +714,8 @@
     if (t.dataset.path) { e.preventDefault(); return openDetail('p:' + t.dataset.path); }
     if (t.dataset.node) { e.preventDefault(); return openDetail(t.dataset.node); }
     const { act, key, code } = t.dataset;
-    if (act === 'select') pin(key, code);
+    if (act === 'select') { if (S.detail && S.detail.startsWith('GE: ')) S.detail = code; // the slot becomes this course
+      if (t.dataset.term) (S.opts.pins = S.opts.pins || {})[code] = t.dataset.term; pin(key, code); }
     else if (act === 'unselect') unpin(key, code);
     else if (t.dataset.group) { e.preventDefault(); openDetail('g:' + t.dataset.group); }
   });
@@ -756,8 +768,8 @@
   document.addEventListener('input', e => {
     const k = e.target.dataset && e.target.dataset.filter; if (k === undefined) return;
     S.filters[k] = e.target.value;
-    const g = groupByKey(k), list = [...document.querySelectorAll('[data-list]')].find(x => x.dataset.list === k);
-    if (g && list) list.innerHTML = optionList(g);
+    const g = groupByKey(k);
+    if (g) document.querySelectorAll('[data-list]').forEach(x => { if (x.dataset.list === k) x.innerHTML = optionList(g); });
   });
   document.addEventListener('change', async e => {
     const t = e.target;

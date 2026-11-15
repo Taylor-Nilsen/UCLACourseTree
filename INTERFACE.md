@@ -29,6 +29,9 @@ already used in parser.js and data/ucla-courses.js.
                   undeclared?: true /* technical-breadth group with no SELECT FROM: student has not declared a TBA */,
                   options: [ { dept, num, alts: string[] /* 'MATH 32A','MATH 32AH' = one slot */,
                                to?: '187' /* range num..to */, wildcard?: '1@@' /* '@' = one digit; all-'@' = any course; alts: [] */ } ] } ] } ],
+  upperUnitsNeeded?: 47 /* section-level "NEEDS: 47.0 UNITS" under UPPER DIVISION REQUIREMENT */,
+  satisfied: [ { name, taken: string[] } ] /* groups the audit counts as complete, with the courses applied */,
+  notices: string[] /* "CONCENTRATION DECLARATION REQUIRED: ..." sections: part of the degree the audit cannot list; the model adds them to warnings */,
   unparsed: [ { section, line, why? } ] /* lines inside a requirement section the parser did not understand */ }
 ```
   Grades: `status` is `done` only for a passing grade (A..D with +/-, P, S, CR, AP/IB/TE/EX test credit, T/U-prefixed transfer
@@ -76,7 +79,8 @@ model = {
             slack?: number /* planned course: offered quarters it can slip with none of those effects, 0..4 (4 = 4 or more) */,
             prereqs: string[][] }],
   edges: [{ from, to }],            // prerequisite -> course, only between nodes present
-  plan:  [{ term: 'WI27', courses: string[], units: number, beyondExpected: boolean }],
+  plan:  [{ term: 'WI27', courses: string[], units: number /* of `courses` */, beyondExpected: boolean,
+            enrolled: string[] /* in-progress classes the audit lists for this later quarter; they take seats and are not in `courses` */ }],
   conflictResolutions: [{ a, b, term, kept: string|null, moved: string|null, movedTo: string|null /* term */, filledBy: string|null, why: string }],
   stats: { unitsEarned, unitsNeeded, plannedUnits, coursesRemaining }
 }
@@ -196,3 +200,9 @@ Plan chips drag between quarters (`move`; a quarter it is not offered in opens a
 before and after). "What to take next" alternates drag onto a top class (`swapIn`, after selecting the alternate in its
 group when it is an unselected option). Plan chips: » defers, ≠ starts conflict mode (then click a class in the same quarter); a red `*` in the upper-left corner marks
 `critical` (also on Tree nodes; a black `*` in the export).
+
+### Additions for real L&S audits
+- A group with a `SELECT FROM` and no `NEEDS` line gets `needCourses` from its title's count word minus applied courses (min 1). A group whose `NEEDS` has units but no course count carries `unitsOnly: true` and is not used as a course-count check.
+- Substitutions: when a `satisfied` group's title names courses ("STATISTICS 12, 13, OR LIFE SCIENCE 40") and none of them is taken, `build` adds them to `parsed.taken` as copies of the applied course with `subst: <that course>`. They count as met prerequisites, are not nodes and are not counted in units.
+- `nextQuarter` picks carry `options: [{ code, title, units }]` and `groupKey` for an open `GE:` / `CHOOSE:` slot: every course of that requirement that can be taken in that quarter. The UI selects one with `opts.choices[groupKey]` plus `opts.pins[code] = term`.
+- Requirements whose section title matches ETHICS, WRITING, DIVERSITY or AMERICAN HISTORY are satisfied by a course selected or required elsewhere that is on their list.

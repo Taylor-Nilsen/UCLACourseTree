@@ -3,7 +3,7 @@
 (function (g) {
   const env = typeof module !== 'undefined' ? Object.assign({}, require('./data/ucla-courses.js'), require('./parser.js')) : g;
   const { COURSES, DARS } = env;
-  const EW = /ETHICS|WRITING/;
+  const EW = /ETHICS|WRITING|DIVERSITY|AMERICAN HISTORY/; // requirements a course used elsewhere also satisfies
   // GE-style lists (hundreds of options) stay as searchable slots in their own area instead of choice nodes
   const BIGLIST = /FOUNDATIONS OF|GENERAL EDUCATION|\bGE\b|DIVERSITY|WRITING II|ENGINEERING WRITING|QUANTITATIVE REASONING|FOREIGN LANGUAGE|LANGUAGE REQUIREMENT/;
   const numOf = n => parseInt(String(n).replace(/^\D+/, ''), 10);
@@ -21,13 +21,30 @@
     const per = opts.perQuarter || 4, choices = opts.choices || {}, warnings = [];
     // done/ip only (failed, withdrawn, incomplete attempts do not count); AP/transfer credit arrives already mapped by the parser (`via`)
     const st = t => t.status || (t.grade === 'IP' ? 'ip' : 'done');
+    // A requirement the audit counts as complete with a course its title does not name ("STATISTICS 12, 13, OR LIFE SCIENCE 40"
+    // met by transfer STATS 10): the named courses count as met prerequisites, so the plan never asks for one of them again.
+    // ponytail: title departments are matched to subject codes by their first 4 letters (STATISTICS -> STATS); DARS prints no exact map.
+    table = table || Object.keys(COURSES).map(k => [k, DARS.splitCode(k)]).filter(x => x[1]);
+    const key4 = s => s.replace(/[^A-Z]/g, '').slice(0, 4);
+    for (const s of parsed.satisfied || []) {
+      const named = [], src = s.taken.find(c => parsed.taken[c] && st(parsed.taken[c]) === 'done');
+      s.name.replace(/([A-Z][A-Z& ]*?) (\d+[A-Z]*(?:(?:, OR |, | OR | AND )\d+[A-Z]*)*)(?![A-Z0-9])/g, (_, d, nums) => {
+        const ns = nums.split(/, OR |, | OR | AND /);
+        for (let w = d.split(' '); w.length; w.shift()) {
+          const hit = table.filter(([, sc]) => key4(w.join(' ')).length === 4 && key4(sc.dept) === key4(w.join(' ')) && ns.includes(sc.num)).map(x => x[0]);
+          if (hit.length) { named.push(...hit); break; }
+        }
+      });
+      if (src && named.length && !named.some(c => parsed.taken[c]))
+        for (const c of named) parsed.taken[c] = Object.assign({}, parsed.taken[src], { subst: src });
+    }
     const taken = {};
     for (const [c, t] of Object.entries(parsed.taken)) if (['done', 'ip'].includes(st(t))) taken[c] = t;
     const chosenBy = new Map(); // code -> groupKey that plans it
 
     // count checks: compare against the itemized groups of the section right before
     parsed.sections.forEach((s, i) => s.groups.forEach(gr => {
-      if (gr.options.length || !i) return;
+      if (gr.options.length || !i || gr.unitsOnly) return;
       const m = parsed.sections[i - 1].groups.reduce((n, x) => n + (x.options.length ? x.needCourses : 0), 0);
       if (gr.needCourses > m) warnings.push(`The audit's course-count check "${gr.name}" wants ${gr.needCourses} more courses, but the itemized requirements only add up to ${m}. Ask your counselor which extra course counts.`);
     }));
@@ -212,8 +229,8 @@
       const c = COURSES[code], t = taken[code];
       nodes.set(code, Object.assign({ code, title: c ? c.t : t ? t.title : code, units: c ? c.u : t ? t.units : 4, offered: c ? c.off : '?', prereqs: c ? c.pre : [] }, c && c.req && !c.pre.length ? { req: c.req } : {}, extra));
     };
-    const viaSrc = new Set(Object.values(taken).map(t => t.via).filter(Boolean));
-    for (const [code, t] of Object.entries(taken)) if (!viaSrc.has(code) && !(t.via && !COURSES[code])) add(code, { status: st(t), term: t.term });
+    const viaSrc = new Set(Object.entries(taken).filter(([c, t]) => t.via && COURSES[c]).map(([, t]) => t.via)); // a source stays a node unless a real course stands in for it
+    for (const [code, t] of Object.entries(taken)) if (!t.subst && !viaSrc.has(code) && !(t.via && !COURSES[code])) add(code, { status: st(t), term: t.term });
     for (const gr of groups) if (gr.selected) for (const c of gr.chosen) {
       if (c.code.startsWith('GE: ')) add(c.code, { title: gr.name, units: gr._slotUnits, offered: 'FWS', status: 'placeholder', groupKey: gr.key });
       else add(c.code, { groupKey: pickedBy.get(c.code) || chosenBy.get(c.code) || gr.key });
@@ -223,6 +240,7 @@
     for (const gr of groups) if (gr.undecided && gr.selected) for (let i = 1; i <= gr._open; i++) slot('CHOOSE: ' + gr.name + (gr._open > 1 ? ' #' + i : ''), gr.name, gr._slotUnits, gr.key);
     for (const a of altSlots) slot(a.code, a.title, a.units, a.groupKey, { pathChoiceKey: a.pathChoiceKey });
     const pull = stack => { while (stack.length) for (const grp of nodes.get(stack.pop()).prereqs) {
+      if (grp.some(x => taken[x])) continue; // met by a course the audit substituted (no node of its own)
       const m = grp.find(x => nodes.has(x)) || grp[0];
       if (!nodes.has(m)) { add(m, {}); stack.push(m); }
     } };
@@ -274,7 +292,10 @@
     for (const n of real) for (const grp of n.prereqs) for (const x of new Set(grp)) if (kids.has(x) && x !== n.code) kids.get(x).push(n.code);
     const hMemo = new Map(), height = c => hMemo.get(c) ?? (hMemo.set(c, 1), hMemo.set(c, 1 + Math.max(0, ...kids.get(c).map(height))), hMemo.get(c));
     const order = real.slice().sort((a, b) => height(b.code) - height(a.code) || kids.get(b.code).length - kids.get(a.code).length || b.units - a.units);
-    const exp = DARS.termIndex(parsed.student.expected), t0 = DARS.termIndex(parsed.currentTerm), have0 = Object.keys(taken), NONE = new Set();
+    const exp = DARS.termIndex(parsed.student.expected), t0 = DARS.termIndex(parsed.currentTerm), NONE = new Set();
+    // classes already enrolled for a later quarter (WI27 on a FA26 audit) take seats there and only count as prereqs after it
+    const ahead = Object.entries(taken).filter(([, x]) => st(x) === 'ip' && !x.subst && DARS.termIndex(x.term) > t0).map(([c, x]) => [c, DARS.termIndex(x.term)]);
+    const have0 = Object.keys(taken).filter(c => !ahead.some(a => a[0] === c));
     const qOf = t => 'FWSU'[((t % 4) + 4) % 4];
     const usable = t => opts.useSummer || qOf(t) !== 'U';
     // notBefore: code -> earliest term index (defers, what-if slips); ban: code -> term indexes it may not use (conflicts);
@@ -286,13 +307,15 @@
       while ((left.length || sl.length) && quarters < 16) {
         if (!usable(++t)) continue;
         quarters++;
+        const seats = per - ahead.filter(a => a[1] === t).length;
+        for (const [c, at] of ahead) if (at < t) have.add(c);
         const q = qOf(t), ok = n => (n.offered === '?' || n.offered.includes(q)) && !(ban.get(n.code) || NONE).has(t) && n.prereqs.every(grp => grp.some(x => have.has(x)));
         const picks = left.concat(sl).filter(n => pins.get(n.code) === t && ok(n)), free = n => !picks.includes(n) && !(pins.get(n.code) > t);
         for (const n of left) {
-          if (picks.length >= per) break;
+          if (picks.length >= seats) break;
           if (free(n) && !(notBefore.get(n.code) > t) && ok(n)) picks.push(n);
         }
-        picks.push(...sl.filter(free).slice(0, Math.max(0, per - picks.length)));
+        picks.push(...sl.filter(free).slice(0, Math.max(0, seats - picks.length)));
         if (!picks.length) continue;
         left = left.filter(n => !picks.includes(n)); sl = sl.filter(n => !picks.includes(n));
         picks.forEach(n => { at.set(n.code, t); have.add(n.code); });
@@ -387,7 +410,14 @@
     for (const [c, t] of cur.at) nodes.get(c).planned = DARS.termName(t);
     for (const [c, t] of PINS) if (cur.at.get(c) !== t) warnings.push(`Couldn't move ${c} to ${tn(t)}: ${(ban.get(c) || NONE).has(t) ? 'a conflict you marked moves it out' : 'its prerequisites are not done before then'}.`);
     order.forEach((n, i) => { n.priority = i; n.unlocks = unlocks(n.code); });
-    const plan = cur.plan.map(({ t, picks }) => ({ term: DARS.termName(t), courses: picks.map(n => n.code), units: picks.reduce((u, n) => u + n.units, 0), beyondExpected: t > exp }));
+    const plan = cur.plan.map(({ t, picks }) => ({ term: DARS.termName(t), courses: picks.map(n => n.code), units: picks.reduce((u, n) => u + n.units, 0), beyondExpected: t > exp,
+      enrolled: ahead.filter(a => a[1] === t).map(a => a[0]) }));
+    // parts of the degree the audit could not list, and unit totals the listed courses do not reach
+    warnings.push(...(parsed.notices || []));
+    const upper = n => numOf((DARS.splitCode(n.code) || {}).num) >= 100 ||
+      n.status === 'placeholder' && (groups.find(x => x.key === n.groupKey) || { options: [] }).options.every(c => numOf((DARS.splitCode(c) || {}).num) >= 100) && !!n.groupKey;
+    const udUnits = [...cur.at.keys()].map(c => nodes.get(c)).filter(upper).reduce((u, n) => u + n.units, 0);
+    if (parsed.upperUnitsNeeded > udUnits) warnings.push(`The audit needs ${parsed.upperUnitsNeeded} more upper-division units (courses numbered 100 to 199). The courses and slots in this plan cover ${udUnits}; the other ${+(parsed.upperUnitsNeeded - udUnits).toFixed(1)} have to come from upper-division courses you select for the open slots, or from extra courses.`);
     if (cur.left.length) warnings.push(`Stopped planning after 16 quarters; still unscheduled: ${cur.left.map(n => n.code).join(', ')}.`);
 
     for (const gr of groups) for (const k of Object.keys(gr)) if (k[0] === '_') delete gr[k];
@@ -395,7 +425,7 @@
     return {
       currentTerm: parsed.currentTerm, expectedTerm: parsed.student.expected, warnings, groups, pathChoices, conflictResolutions,
       nodes: [...nodes.values()], edges, plan,
-      stats: { unitsEarned: Object.values(parsed.taken).filter(x => st(x) === 'done' && !x.via).reduce((u, x) => u + x.units, 0),
+      stats: { unitsEarned: Object.values(parsed.taken).filter(x => st(x) === 'done' && !x.via && !x.subst).reduce((u, x) => u + x.units, 0),
         unitsNeeded: parsed.unitsNeeded, plannedUnits, coursesRemaining: plan.reduce((n, p) => n + p.courses.length, 0) },
     };
   }
@@ -488,7 +518,10 @@
       alts.sort((a, b) => rank(a) - rank(b));
       const why = slot ? (n.code.startsWith('GE: ') ? 'any approved course from the list' : 'decision pending: select a course')
         : [n.critical ? 'must take now: delaying it pushes back ' + n.criticalWhy : `can slip ${n.slack}${n.slack >= 4 ? '+' : ''} offered quarter${n.slack === 1 ? '' : 's'}`, unl(n)].filter(Boolean).join('; ');
-      return { code: n.code, title: n.title, units: n.units, critical: !!n.critical, slot, why, alts };
+      // an open slot: every course on its requirement's list that can be taken this quarter
+      const sg = slot && !n.pathChoiceKey && groupOf(n.groupKey);
+      const options = sg ? (sg.placeholder ? sg.options : sg.alternatives.map(a => a.code)).filter(c => COURSES[c] && can(c)).map(c => ({ code: c, title: titleOf(c), units: COURSES[c].u })) : [];
+      return { code: n.code, title: n.title, units: n.units, critical: !!n.critical, slot, why, alts, options, groupKey: sg ? sg.key : null };
     });
     return { term: T, terms, picks };
   }

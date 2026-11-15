@@ -45,7 +45,7 @@
   // grade -> 'done' | 'ip' | 'failed' | 'withdrawn' | 'incomplete' | 'unknown'. T/U prefix = transfer grade (UCLA).
   function gradeStatus(grade) {
     const g = String(grade || '').toUpperCase().replace(/>.*$/, '');
-    if (/^(IP|IPPF|PL|PLN|PLAN|PLANNED|RG|RGPF|PG|PGPF|REG|\*+)$/.test(g)) return 'ip';
+    if (/^(IP[A-Z]{0,2}|PL|PLN|PLAN|PLANNED|RG|RGPF|PG|PGPF|REG|\*+)$/.test(g)) return 'ip';
     if (/^(W|WD|WF|WP|WU|WX|WN|DROP)$/.test(g)) return 'withdrawn';
     if (/^(I|IN|INC|IF|NR|DR|DE|X|Z)$/.test(g)) return 'incomplete';
     if (/^(AP|IB|TE|EX|GCE|TR|T|CRE|CL|DS|EXM)$/.test(g)) return 'done'; // exam / test / transfer credit
@@ -60,6 +60,8 @@
   function parseOptions(text, currentTerm, info) {
     info = info || {}; const bad = info.bad || (info.bad = []), attrs = info.attrs || (info.attrs = []);
     text = String(text || '').replace(/\bF:(\S+)/g, (_, a) => { attrs.push(a.replace(/,$/, '')); return ' '; });
+    // real audits also print "[PERSPCTV-US COLLEGE]" notes, "**HISTORICAL**" sub-list markers and "ATMOS&OCEANIC : A&O SCI 101" department labels
+    text = text.replace(/\[[^\]]*\]/g, ' ').replace(/\*+[A-Z ]+\*+/g, ' ').replace(/[A-Z][A-Z&' -]*:(?=\s)/g, ' ');
     text = text.replace(/\(\s*([A-Z]{2}\s*\d{2}|0000)\s*-\s*([A-Z]{2}\s*\d{2}|9999)\s*\)/g, (_, a, b) => '(' + a.replace(/\s/g, '') + '-' + b.replace(/\s/g, '') + ')');
     const re = new RegExp('(' + WILD + '|' + CODE + ')(?:\\(([^)]*)\\))?', 'g');
     const out = []; let dept = null, last = 0, m;
@@ -93,7 +95,7 @@
   const isChrome = l => /^\d{1,2}\/\d{1,2}\/\d{2,4},? \d{1,2}:\d\d(:\d\d)?\s*[AP]M\b/.test(l) || /dars\.ucla\.edu|printerFriendly|about:blank|selfservice\/audit/i.test(l) ||
     /My Audit - Audit Results Tab/i.test(l) || /^(Page )?\d+ (of|\/) \d+$/i.test(l) || /^\d+\/\d+$/.test(l);
   const PROGRAM_ROW = /^(?:[*>]\s*)?((?:MAJOR|MINOR|SPEC|SPECIALIZATION|CONC|CONCENTRATION|CERT|PREMAJOR|PRE-MAJOR|OPTION)\s?\d*)\s+(\d{4}\s+(?:FALL|WINTER|SPRING|SUMMER))\s+([A-Z]{0,4}\d{2,6}[A-Z]{0,2})\s+(.+)$/;
-  const empty = (reason, unparsed) => ({ ok: false, reason, student: { programs: [] }, taken: {}, sections: [], unitsNeeded: null, currentTerm: null, unparsed: unparsed || [] });
+  const empty = (reason, unparsed) => ({ ok: false, reason, student: { programs: [] }, taken: {}, sections: [], unitsNeeded: null, currentTerm: null, unparsed: unparsed || [], satisfied: [], notices: [] });
 
   function parse(input) {
     try { return parseLines(input); }
@@ -145,7 +147,7 @@
       if ((m = COURSE_LINE.exec(line))) {
         dars++;
         const cm = m, sc = splitCode(cm[3]);
-        if (!sc) { if (!/^[A-Z]+$/.test(cm[3])) unparsed(line, 'course code not recognized'); continue; } // NONTRNS / NONCRDT rows have no course
+        if (!sc) { if (!/^[A-Z ]+$/.test(cm[3])) unparsed(line, 'course code not recognized'); continue; } // NONTRNS / NONCRDT rows have no course
         let grade = cm[5], title = cm[6], flags = [];
         if (grade.includes('>')) { flags.push(grade.slice(grade.indexOf('>'))); grade = grade.slice(0, grade.indexOf('>')); }
         while ((m = /^(>\S*|\(R\)|RP|\*+)\s*/.exec(title)) && m[0]) { flags.push(m[1]); title = title.slice(m[0].length); }
@@ -161,14 +163,16 @@
       if ((m = /^ALTERNATE CRS:\s*(.+)$/.exec(line))) { const sc = splitCode(m[1]); if (sc && lastTaken) addTaken(sc.dept + ' ' + sc.num, Object.assign({}, res.taken[lastTaken], { via: lastTaken })); continue; }
       if ((m = /^NEEDS:\s*(.*)$/i.exec(line))) {
         dars++; lastHeaderWasTop = false;
-        const s = m[1].toUpperCase(), sg = /(\d+) SUB-?GROUPS?/.exec(s), c = /(\d+) COURSES?/.exec(s), u = /([\d.]+) (?:UNITS?|HOURS?|CREDITS?)/.exec(s);
+        const s = m[1].toUpperCase(), sg = /(\d+) SUB-?GROUPS?/.exec(s), c = /(\d+) (?:SETS? ?\/ ?)?COURSES?/.exec(s), u = /([\d.]+) (?:UNITS?|HOURS?|CREDITS?)/.exec(s);
         if (sg) { if (section) section.needSubgroups = +sg[1]; continue; }
-        if (section && /^UNIT CHECK/.test(section.title) && u) { res.unitsNeeded = +u[1]; continue; }
+        if (section && u && /^UNIT CHECK/.test(section.title)) { res.unitsNeeded = +u[1]; continue; }
+        if (section && !group && u && !c && /^MINIMUM \d+ UNITS/.test(section.title)) { res.unitsNeeded = +u[1]; continue; }
+        if (section && !group && u && !c && /^UPPER DIVISION/.test(section.title)) { res.upperUnitsNeeded = +u[1]; continue; }
         if (/GPA/.test(s)) continue;
         if (!c && !u) { unparsed(line, 'NEEDS line not recognized'); continue; }
         if (!section) continue;
         if (!group) newGroup(section.title);
-        group.needCourses = c ? +c[1] : null; group.needUnits = u ? +u[1] : null;
+        group.needCourses = c ? +c[1] : null; group.needUnits = u ? +u[1] : null; if (!c) group.unitsOnly = true;
         if (!group.needCourses && group.needUnits) group.needCourses = Math.max(1, Math.floor(group.needUnits / 4)); // GE "4.0 UNITS" or "5.0 UNITS" = 1 course
         mode = null; continue;
       }
@@ -184,7 +188,7 @@
       if ((mode === 'select' || mode === 'not') && group && (x > dataX + 10 || (/\d/.test(line) && x >= dataX - 10 && !(x <= dataX + 6 && (REQ_LINE.test(next(i)) || isSummary(next(i)))))) && !/^[A-Z][A-Z &-]+$/.test(line)) { group[mode === 'select' ? '_sel' : '_not'] += ' ' + line; continue; }
       mode = null;
       if (/^[^A-Za-z0-9\s]{1,3}$/.test(line)) { unparsed(line, 'unknown status marker'); continue; }
-      if (isSummary(line) || /^[^A-Za-z0-9]*$/.test(line)) continue;
+      if (isSummary(line) || /^[^A-Za-z0-9]*$/.test(line)) { if (section && !section.note && !/^NEEDS:/i.test(next(i))) lastHeaderWasTop = false; continue; } // a units line ends a header: the next caps line is a new section, not a note
       if (x > dataX + 150) continue; // right-hand annotation column (AP TEST:, transfer school, grade changes)
       if (!caps) { if (section && !/[a-z]/.test(line) && /[A-Z0-9]/.test(line) && line.length > 2) unparsed(line); lastHeaderWasTop = false; continue; } // prose is fine; caps junk is not
       const top = level ? level === 'top' : x < dataX - 10;
@@ -212,6 +216,16 @@
       for (const b of info.bad) res.unparsed.push({ section: s.title, line: b, why: 'not a course code in the list for ' + gr.name });
       delete gr._sel; delete gr._not;
     }
+    // a sub-group printed with a SELECT FROM list but no NEEDS line (GE "ONE HISTORICAL ANALYSIS COURSE") is still open:
+    // its title's count minus what is already applied, at least 1
+    const WORDS = { ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5, SIX: 6 };
+    for (const s of res.sections) for (const gr of s.groups) if (gr.options.length && gr.needCourses === undefined)
+      gr.needCourses = Math.max(1, (WORDS[gr.name.split(' ')[0]] || 1) - gr.taken.length);
+    // requirements the audit counts as complete, with the courses it applied (the model reads substitutions from these)
+    res.satisfied = res.sections.flatMap(s => s.groups.filter(gr => !gr.needCourses && gr.taken.length).map(gr => ({ name: gr.name, taken: gr.taken })));
+    // "CONCENTRATION DECLARATION REQUIRED": part of the degree the audit cannot list yet
+    res.notices = res.sections.filter(s => /DECLARATION REQUIRED|NOT (YET )?DECLARED/.test(s.title) && !s.groups.some(gr => gr.needCourses))
+      .map(s => s.title + ': ' + s.groups.map(gr => gr.note && gr.note !== gr.name ? gr.name === s.title ? gr.note : gr.name + ' ' + gr.note : gr.name).join(' ').split(/(?<=\.) /).slice(0, 2).join(' ')); // first two sentences: lines with lowercase ("IoES") are dropped, so the rest reads broken
     // drop groups that have nothing outstanding
     for (const s of res.sections) s.groups = s.groups.filter(gr => gr.needCourses);
     res.sections = res.sections.filter(s => s.groups.length);
