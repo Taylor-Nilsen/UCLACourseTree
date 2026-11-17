@@ -1,10 +1,25 @@
 // Degree-plan model: parsed DARS -> requirement choices, prerequisite graph and a quarter-by-quarter plan.
-// Contract: INTERFACE.md. Depends on COURSES (data/ucla-courses.js), GRADES (data/ucla-grades.js) and DARS (parser.js).
+// Contract: INTERFACE.md. Depends on COURSES (data/ucla-courses.js), GRADES (data/ucla-instructors.js) and DARS (parser.js).
 (function (g) {
-  const env = typeof module !== 'undefined' ? Object.assign({}, require('./data/ucla-courses.js'), require('./data/ucla-grades.js'), require('./parser.js')) : g;
+  const env = typeof module !== 'undefined' ? Object.assign({}, require('./data/ucla-courses.js'), require('./data/ucla-instructors.js'), require('./parser.js')) : g;
   const { COURSES, DARS } = env, GRADES = env.GRADES || { c: {} };
   // Share of past letter grades that were A+/A/A- for `code`. For the term GRADES lists instructors for ('WI27' = '27W'), `a` is
   // the best listed instructor's own figure in that course; otherwise, or when none of them has taught it, the all-instructor figure.
+  // GRADES starts with only the next term's instructor names; setGrades adds the figures for one course from uclagrades.com's rows
+  // (https://www.uclagrades.com/data/courses/<subject>/<number>.json), which the UI fetches when the course is first shown.
+  const LETTER = new Set(['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D+', 'D', 'D-', 'F']); // P/NP, S/U, I, DR... are left out
+  const profKey = name => { const [last, rest = ''] = String(name).toUpperCase().split(','); return last.trim() + ',' + rest.trim()[0]; }; // "KERANEN,J"
+  function gradeStat(rows) {
+    const cells = {}; // a co-taught section repeats its rows once per instructor: count each term + section + grade once
+    for (const r of rows) if (LETTER.has(r.gradeOffered)) cells[`${r.enrollmentTerm}|${r.sectionNumber}|${r.gradeOffered}`] = r;
+    let a = 0, n = 0;
+    for (const r of Object.values(cells)) { n += +r.gradeCount; if (r.gradeOffered[0] === 'A') a += +r.gradeCount; }
+    return n >= 10 ? { a: Math.round(100 * a / n), n } : {}; // under 10 letter grades is noise (a 6-person seminar)
+  }
+  function setGrades(code, rows) {
+    const e = GRADES.c[code] || {};
+    return GRADES.c[code] = { ...gradeStat(rows), ...(e.p && { p: e.p.map(p => ({ name: p.name, ...gradeStat(rows.filter(r => profKey(r.instructorName) === profKey(p.name))) })) }) };
+  }
   function gradeFor(code, term) {
     const e = GRADES.c[code]; if (!e) return null;
     const ps = term && GRADES.term === term.slice(2) + term[0] && e.p || [], best = ps.filter(p => p.n).sort((x, y) => y.a - x.a)[0];
@@ -538,5 +553,5 @@
     });
     return { term: T, terms, picks };
   }
-  g.MODEL = { build, previewChange, nextQuarter, gradeFor };
+  g.MODEL = { build, previewChange, nextQuarter, gradeFor, setGrades, GRADES };
 })(typeof module !== 'undefined' ? module.exports : window);

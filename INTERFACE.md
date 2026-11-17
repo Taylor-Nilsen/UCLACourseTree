@@ -201,8 +201,11 @@ before and after). "What to take next" alternates drag onto a top class (`swapIn
 group when it is an unselected option). Plan chips: » defers, ≠ starts conflict mode (then click a class in the same quarter); a red `*` in the upper-left corner marks
 `critical` (also on Tree nodes; a black `*` in the export).
 
-### Grades (`window.GRADES`, data/ucla-grades.js)
-`GRADES = { term: '27W', c: { [code]: { a?, n?, p?: [{ name, a?, n? }] } } }` (see README "Grade data").
+### Grades (`window.GRADES`, data/ucla-instructors.js; also `MODEL.GRADES`)
+`GRADES = { term: '27W', c: { [code]: { a?, n?, p?: [{ name, a?, n? }] } } }` (see README "Grade data"). The file holds only `term` and
+the `p` names. `MODEL.setGrades(code, rows)` fills `a`/`n` for the course and each listed instructor from uclagrades.com's rows
+(`{ enrollmentTerm, sectionNumber, gradeOffered, gradeCount, instructorName }`) and returns the entry. The UI (`want(code)` in ui.js)
+fetches a course's rows the first time it is shown or ranked, then renders again; until then `gradeFor` returns null for it.
 `MODEL.gradeFor(code, term?) -> { a, n, prof: string|null, profs, text } | null`. When `term` (DARS form, `'WI27'`) is `GRADES.term`
 and a listed instructor has past grades in the course, `a`/`n`/`prof` are the best such instructor's; otherwise the all-instructor
 figure. `text` reads "A's: Henary, M. 61%, Pang, J. 62%, all instructors 64%". `nextQuarter` puts `grade` (that object or null) on every

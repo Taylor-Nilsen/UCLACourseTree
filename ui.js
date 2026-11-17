@@ -208,7 +208,42 @@
   // "Title · F/W" for a long-list option: what it is and the quarters it runs
   const optInfo = c => { const k = course(c); return !k ? 'not in course database' : k.t + (k.off === '' ? ' · not offered recently' : k.off === '?' ? '' : ' · ' + k.off.split('').join('/')); };
   // courses on a slot's list that can be taken in `term`; selecting one plans it for that quarter
-  const aText = (code, term) => (MODEL.gradeFor(code, term) || {}).text || '';
+  // Grades come live from uclagrades.com (one small JSON per course, any origin may read it) the first time a course is shown in a
+  // place that prints A's; the render that asked is repeated when they arrive. Results are kept in local storage for a week.
+  const G = MODEL.GRADES, GC = (c => c && c.term === G.term && Date.now() - c.at < 7 * 864e5 ? c : { term: G.term, at: Date.now(), c: {} })(store.get('dars.grades'));
+  for (const [k, v] of Object.entries(GC.c)) if (v) G.c[k] = v;
+  const asked = new Set(Object.keys(GC.c)); let queue = [], fetching = false;
+  function want(code) {
+    if (asked.has(code) || !course(code)) return;
+    asked.add(code); queue.push(code);
+    if (!fetching) { fetching = true; setTimeout(pull); }
+  }
+  async function pull() {
+    while (queue.length) {
+      const batch = queue; let i = 0; queue = [];
+      await Promise.all(Array.from({ length: 8 }, async () => { // at most 8 requests in flight
+        while (i < batch.length) {
+          const code = batch[i++], sp = code.lastIndexOf(' ');
+          try {
+            const r = await fetch(`https://www.uclagrades.com/data/courses/${encodeURIComponent(code.slice(0, sp))}/${encodeURIComponent(code.slice(sp + 1))}.json`);
+            if (r.ok) MODEL.setGrades(code, await r.json());
+            if (r.ok || r.status === 404) GC.c[code] = r.ok ? G.c[code] : 0; // 404 = no grade data for this course
+            else asked.delete(code);
+          } catch (e) { asked.delete(code); /* offline or the site is down: the app works without grades; ask again on a later render */ }
+        }
+      }));
+      store.set('dars.grades', GC);
+      if (S.drag) S.stale = true; else render();
+    }
+    fetching = false;
+  }
+  // everything nextQuarter shows or ranks by A's: its picks, alternates and options, and every option of a select-N-of-M requirement
+  const wantPicks = r => {
+    for (const x of r.picks) [x, ...x.alts, ...x.options].forEach(o => want(o.code));
+    for (const g of S.model.groups) if (g.choice) g.alternatives.forEach(a => want(a.code));
+    return r;
+  };
+  const aText = (code, term) => (want(code), (MODEL.gradeFor(code, term) || {}).text || '');
   const termOptions = (x, term) => !x || !x.options.length ? '' : `<details class="alts" open><summary>${x.options.length} course${x.options.length === 1 ? '' : 's'} you could take in ${esc(term)}, most A's first</summary><div class="optlist tall">` +
     x.options.slice(0, 200).map(o => optRow(x.groupKey, o.code, `${o.title} · ${o.units} u${o.grade ? ' · ' + o.grade.text : ''}`, 'select', '', undefined, term)).join('') +
     (x.options.length > 200 ? `<p class="muted small">Showing 200 of ${x.options.length}. Open the slot to filter the full list.</p>` : '') + '</div></details>';
@@ -459,7 +494,7 @@
   // "What to take next": one column per class of the chosen quarter (most important left), alternates under it (best on top).
   // » defers a class, ≠ marks a conflict; an alternate opens its course or its options panel, or is dragged onto a class to take it instead.
   function renderNext() {
-    const r = MODEL.nextQuarter(S.model, S.nextTerm, { defers: S.opts.defers }), nm = nodeMap();
+    const r = wantPicks(MODEL.nextQuarter(S.model, S.nextTerm, { defers: S.opts.defers })), nm = nodeMap();
     renderCfStatus();
     $('#nextterm').innerHTML = r.terms.map(t => `<option value="${esc(t)}"${t === r.term ? ' selected' : ''}>${esc(t)}${t === r.terms[0] ? ' (next)' : ''}</option>`).join('');
     const alt = a => {
@@ -627,7 +662,7 @@
       ${g && !g.placeholder && (g.choice || (g.altGroupKeys || []).length) ? `<p><a href="#" data-group="${esc(g.key)}">All options for this requirement</a></p>` : ''}
       <h3>Prerequisites</h3>${pre ? `<ul class="prelist">${pre}</ul>` : '<p class="muted">None</p>'}
       ${n.pathPrereq ? '<p class="muted small">Only an option you have not selected yet needs this, so it is not in the plan.</p>' : ''}
-      ${n.status === 'placeholder' && g && g.placeholder ? `<h3>Select a course</h3>${n.planned ? termOptions(MODEL.nextQuarter(S.model, n.planned, { defers: S.opts.defers }).picks.find(x => x.code === n.code), n.planned) : ''}
+      ${n.status === 'placeholder' && g && g.placeholder ? `<h3>Select a course</h3>${n.planned ? termOptions(wantPicks(MODEL.nextQuarter(S.model, n.planned, { defers: S.opts.defers })).picks.find(x => x.code === n.code), n.planned) : ''}
         <p class="small muted">All ${esc(g.optionCount)} options (code or title):</p><input type="search" class="filter" data-filter="${esc(g.key)}" placeholder="Filter options" value="${esc(S.filters[g.key] || '')}">
         <div class="optlist tall" data-list="${esc(g.key)}">${optionList(g)}</div>` : n.status === 'placeholder' ? '<p class="muted small">Select a specific course for this slot in the requirements panel.</p>' : ''}
       ${n.req ? `<h3>Catalog requisites</h3><p>${esc(n.req)}</p>` : ''}`;
@@ -743,7 +778,7 @@
     e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', el.dataset.drag);
   });
   document.addEventListener('dragover', e => { const z = dropZone(e); if (!z) return; e.preventDefault(); if (!z.classList.contains('over')) { clearOver(); z.classList.add('over'); } });
-  document.addEventListener('dragend', () => { S.drag = null; clearOver(); });
+  document.addEventListener('dragend', () => { S.drag = null; clearOver(); if (S.stale) { S.stale = false; render(); } });
   document.addEventListener('drop', e => {
     const z = dropZone(e); if (!z) return;
     e.preventDefault(); clearOver();

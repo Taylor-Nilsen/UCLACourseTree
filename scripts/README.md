@@ -1,24 +1,23 @@
 # scripts
 
-## build-grades.mjs
+## build-instructors.mjs
 
-Regenerates `data/ucla-grades.js` (A percentage per course, and per instructor listed for the next term).
+Regenerates `data/ucla-instructors.js` (the instructors the Schedule of Classes lists for the next term). Grades need no build:
+the browser reads them from uclagrades.com.
 
 ```
-node scripts/build-grades.mjs                       # next term by today's date; caches in $TMPDIR/ucla-grades-cache
-node scripts/build-grades.mjs --term 27W --grades ./uclagrades.com/data --cache ./grades-cache
+node scripts/build-instructors.mjs                  # next term by today's date; caches in $TMPDIR/ucla-instructors-cache
+node scripts/build-instructors.mjs --term 27W --cache ./instructors-cache
 ```
 
-Plain Node 22 plus `git`, no dependencies. Run it after `build-course-db.mjs`, and again when the Schedule of Classes publishes
-instructors for a new term or uclagrades.com adds a term. About 2,200 Schedule of Classes requests, 5 minutes cold.
+Plain Node 22, no dependencies. Run it after `build-course-db.mjs`, and again when the Schedule of Classes publishes
+instructors for a new term. About 2,200 requests, 5 minutes cold. Delete the cache to refetch.
 
-- Grades: every `data/grades-*.csv` in github.com/nathanhleung/uclagrades.com (shallow-cloned into the cache unless `--grades`
-  points at a copy). Two column layouts, see that repo's `data/header-old.csv` and `header-new.csv`. A co-taught section repeats
-  its rows per instructor, so course totals count each term + section + grade once.
-- Instructors: for each subject, the `CourseTitlesView` pages of the term, then one `/Results/GetCourseSummary?model=...` per
-  course (the `model` JSON is in the titles page). Names come as "Keranen, J.P."; "Tentative" and "The Staff" are skipped.
+- For each subject, the `CourseTitlesView` pages of the term, then one `/Results/GetCourseSummary?model=...` per course (the
+  `model` JSON is in the titles page). Names come as "Keranen, J.P."; "Tentative" and "The Staff" are skipped.
   A term further out than the next one lists only "Tentative".
-- Matching: last name + first initial, within the same course.
+- The Schedule of Classes sends no `Access-Control-Allow-Origin` header, so a browser on another site cannot make these
+  requests. That is why this part is a file and not a live lookup.
 
 ## build-course-db.mjs
 

@@ -471,7 +471,7 @@ t('real L&S transfer audit: substitutions, classes enrolled ahead, GE slots list
   assert.deepEqual(dbl.groups.find(g => g.key === dv.key).chosen.map(c => c.code), [both]);
 });
 t("grades: A percentage orders one requirement's options; a listed instructor's own figure is used for that term only", () => {
-  const { GRADES } = require('../data/ucla-grades.js');
+  const { GRADES } = MODEL;
   GRADES.term = '27W';
   Object.assign(GRADES.c, { 'ZZ 11': { a: 40, n: 100 }, 'ZZ 12': { a: 30, n: 200, p: [{ name: 'Bruin, J.', a: 80, n: 50 }, { name: 'New, N.' }] } });
   assert.equal(MODEL.gradeFor('ZZ 10', 'WI27'), null);
@@ -485,5 +485,13 @@ t("grades: A percentage orders one requirement's options; a listed instructor's 
   const slot = MODEL.nextQuarter(MODEL.build(p, { perQuarter: 3 })).picks.find(x => x.slot);
   assert.deepEqual(slot.options.map(o => o.code), ['ZZ 12', 'ZZ 11', 'ZZ 10']); // no grade data goes last
   assert.deepEqual(slot.alts.map(a => a.code), ['ZZ 12', 'ZZ 11', 'ZZ 10']);
+});
+t('setGrades: uclagrades.com rows become A percentages; co-taught rows count once; listed instructors match by last name + initial', () => {
+  const row = (term, sect, grd, k, who) => ({ enrollmentTerm: term, sectionNumber: sect, gradeOffered: grd, gradeCount: String(k), instructorName: who });
+  MODEL.GRADES.c['ZZ 13'] = { p: [{ name: 'Bruin, J.B.' }, { name: 'Other, O.' }] };
+  const e = MODEL.setGrades('ZZ 13', [row('25F', '1', 'A', 30, 'BRUIN, JOSEPHINE B'), row('25F', '1', 'B+', 10, 'BRUIN, JOSEPHINE B'), row('25F', '1', 'P', 50, 'BRUIN, JOSEPHINE B'),
+    row('26W', '1', 'A-', 10, 'SMITH, AL'), row('26W', '1', 'A-', 10, 'JONES, BO'), row('26W', '1', 'F', 50, 'SMITH, AL'), row('26W', '1', 'F', 50, 'JONES, BO')]);
+  assert.deepEqual(e, { a: 40, n: 100, p: [{ name: 'Bruin, J.B.', a: 75, n: 40 }, { name: 'Other, O.' }] });
+  assert.deepEqual(MODEL.setGrades('ZZ 14', [row('25F', '1', 'A', 9, 'X, Y')]), {}); assert.equal(MODEL.gradeFor('ZZ 14', 'WI27'), null);
 });
 console.log(n + ' passed');
