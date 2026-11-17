@@ -1,5 +1,25 @@
 # scripts
 
+## build-grades.mjs
+
+Regenerates `data/ucla-grades.js` (A percentage per course, and per instructor listed for the next term).
+
+```
+node scripts/build-grades.mjs                       # next term by today's date; caches in $TMPDIR/ucla-grades-cache
+node scripts/build-grades.mjs --term 27W --grades ./uclagrades.com/data --cache ./grades-cache
+```
+
+Plain Node 22 plus `git`, no dependencies. Run it after `build-course-db.mjs`, and again when the Schedule of Classes publishes
+instructors for a new term or uclagrades.com adds a term. About 2,200 Schedule of Classes requests, 5 minutes cold.
+
+- Grades: every `data/grades-*.csv` in github.com/nathanhleung/uclagrades.com (shallow-cloned into the cache unless `--grades`
+  points at a copy). Two column layouts, see that repo's `data/header-old.csv` and `header-new.csv`. A co-taught section repeats
+  its rows per instructor, so course totals count each term + section + grade once.
+- Instructors: for each subject, the `CourseTitlesView` pages of the term, then one `/Results/GetCourseSummary?model=...` per
+  course (the `model` JSON is in the titles page). Names come as "Keranen, J.P."; "Tentative" and "The Staff" are skipped.
+  A term further out than the next one lists only "Tentative".
+- Matching: last name + first initial, within the same course.
+
 ## build-course-db.mjs
 
 Regenerates `data/ucla-courses.js` (every UCLA undergraduate course, with the quarters it was offered) from the UCLA General

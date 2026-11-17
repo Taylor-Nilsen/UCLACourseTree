@@ -208,8 +208,9 @@
   // "Title · F/W" for a long-list option: what it is and the quarters it runs
   const optInfo = c => { const k = course(c); return !k ? 'not in course database' : k.t + (k.off === '' ? ' · not offered recently' : k.off === '?' ? '' : ' · ' + k.off.split('').join('/')); };
   // courses on a slot's list that can be taken in `term`; selecting one plans it for that quarter
-  const termOptions = (x, term) => !x || !x.options.length ? '' : `<details class="alts" open><summary>${x.options.length} course${x.options.length === 1 ? '' : 's'} you could take in ${esc(term)}</summary><div class="optlist tall">` +
-    x.options.slice(0, 200).map(o => optRow(x.groupKey, o.code, `${o.title} · ${o.units} u`, 'select', '', undefined, term)).join('') +
+  const aText = (code, term) => (MODEL.gradeFor(code, term) || {}).text || '';
+  const termOptions = (x, term) => !x || !x.options.length ? '' : `<details class="alts" open><summary>${x.options.length} course${x.options.length === 1 ? '' : 's'} you could take in ${esc(term)}, most A's first</summary><div class="optlist tall">` +
+    x.options.slice(0, 200).map(o => optRow(x.groupKey, o.code, `${o.title} · ${o.units} u${o.grade ? ' · ' + o.grade.text : ''}`, 'select', '', undefined, term)).join('') +
     (x.options.length > 200 ? `<p class="muted small">Showing 200 of ${x.options.length}. Open the slot to filter the full list.</p>` : '') + '</div></details>';
   const enrolledChips = (t, nm) => (t.enrolled || []).map(c => `<button class="pchip s-ip" data-node="${esc(c)}" title="Already enrolled for ${esc(t.term)}"><b>${esc(c)}</b><span>${esc(titleOf(c, nm))}</span><small>${esc((nm[c] || {}).units ?? '')} u · enrolled</small></button>`).join('');
   function optionList(g) {
@@ -463,7 +464,7 @@
     $('#nextterm').innerHTML = r.terms.map(t => `<option value="${esc(t)}"${t === r.term ? ' selected' : ''}>${esc(t)}${t === r.terms[0] ? ' (next)' : ''}</option>`).join('');
     const alt = a => {
       const open = nm[a.code] ? `data-node="${esc(a.code)}"` : a.groupKey ? `data-group="${esc(a.groupKey)}"` : '';
-      return `<a href="#" class="nalt" draggable="true" data-drag="${esc(a.code)}"${a.groupKey && !nm[a.code] ? ` data-gk="${esc(a.groupKey)}"` : ''} ${open}><b>${esc(a.code)}</b><span>${esc(a.title)}</span><small>${esc(a.why)}</small></a>`;
+      return `<a href="#" class="nalt" draggable="true" data-drag="${esc(a.code)}"${a.groupKey && !nm[a.code] ? ` data-gk="${esc(a.groupKey)}"` : ''} ${open}><b>${esc(a.code)}</b><span>${esc(a.title)}</span><small>${esc(a.why)}</small>${a.grade ? `<small>${esc(a.grade.text)}</small>` : ''}</a>`;
     };
     const pt = (S.model.plan || []).find(t => t.term === r.term) || {};
     $('#next').innerHTML = ((pt.enrolled || []).length ? `<div class="ncol"><div class="nrank">already enrolled</div>${enrolledChips(pt, nm)}</div>` : '') + r.picks.map((x, i) => {
@@ -471,7 +472,7 @@
       const top = x.code.startsWith('CHOOSE: ')
         ? `<button class="pchip choose" ${n.pathChoiceKey ? `data-path="${esc(n.pathChoiceKey)}"` : `data-group="${esc(n.groupKey)}"`}><b>choose: ${esc(n.title)}</b><small>${esc(x.units)} u</small></button>`
         : courseChip(x.code, r.term, nm, '');
-      return `<div class="ncol"><div class="nrank">#${i + 1}${i || x.slot ? '' : ' most important'}</div><div class="ntop" data-drop="next" data-out="${esc(x.code)}" data-term="${esc(r.term)}">${top}</div><span class="nwhy">${esc(x.why)}</span>
+      return `<div class="ncol"><div class="nrank">#${i + 1}${i || x.slot ? '' : ' most important'}</div><div class="ntop" data-drop="next" data-out="${esc(x.code)}" data-term="${esc(r.term)}">${top}</div><span class="nwhy">${esc(x.why)}${x.grade ? `<br>${esc(x.grade.text)}` : ''}</span>
         ${termOptions(x, r.term)}${x.alts.length ? `<div class="nalt-h">If you can't take it:</div>${x.alts.map(alt).join('')}` : x.slot ? '' : '<div class="nalt-h">Nothing else can be taken this quarter in its place.</div>'}</div>`;
     }).join('') || '<p class="muted pad">Nothing left to plan.</p>';
   }
@@ -571,7 +572,7 @@
         <div class="small muted">Offered: ${esc(offeredText(o.code))}</div>
         ${pre ? `<ul class="prelist small">${pre}</ul>` : `<div class="small muted">${c.t ? 'No prerequisites' : 'Prerequisites unknown'}</div>`}
         ${c.req ? `<div class="small muted">Catalog: ${esc(c.req)}</div>` : ''}
-        ${o.why ? `<div class="small muted">${esc(o.why)}</div>` : ''}</div>`;
+        ${o.why ? `<div class="small muted">${esc(o.why)}</div>` : ''}${aText(o.code) ? `<div class="small muted">${esc(aText(o.code))}</div>` : ''}</div>`;
     }).join('');
     // open slots, or which selection a new one replaces (pin() drops the oldest)
     const mine = S.opts.choices[g.key] || [], left = g.need - g.chosen.filter(c => !c.auto).length;
@@ -621,6 +622,7 @@
       <dt>Units</dt><dd>${esc(n.units)}</dd>
       ${n.term ? `<dt>Taken</dt><dd>${esc(n.term)}</dd>` : ''}${n.planned ? `<dt>Planned</dt><dd>${esc(n.planned)}${n.critical ? ` <span class="crit-t">* ${esc(critText(n))}</span>` : n.slack ? ` <small class="muted">(can slip ${esc(n.slack)}${n.slack >= 4 ? '+' : ''} offered quarter${n.slack === 1 ? '' : 's'})</small>` : ''}</dd>` : ''}
       <dt>Offered</dt><dd>${esc(off)}</dd>
+      ${aText(n.code, n.planned) ? `<dt>Grades</dt><dd>${esc(aText(n.code, n.planned).replace(/^A's: /, ''))}<br><small class="muted">share of past letter grades that were A+, A or A-</small></dd>` : ''}
       ${g ? `<dt>Satisfies</dt><dd>${esc(g.name)}<br><small class="muted">${esc(g.section)}</small></dd>` : ''}</dl>
       ${g && !g.placeholder && (g.choice || (g.altGroupKeys || []).length) ? `<p><a href="#" data-group="${esc(g.key)}">All options for this requirement</a></p>` : ''}
       <h3>Prerequisites</h3>${pre ? `<ul class="prelist">${pre}</ul>` : '<p class="muted">None</p>'}

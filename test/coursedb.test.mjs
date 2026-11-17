@@ -42,4 +42,12 @@ t('dangling prerequisite references < 3%', () => {
   for (const e of Object.values(D)) for (const g of e.pre) for (const c of g) { refs++; if (!D[c]) bad++; }
   assert.ok(refs > 3000); assert.ok(bad / refs < 0.03, `${bad}/${refs} dangling`);
 });
+t('grades file: every key is a course, percentages are sane, the next term has instructors with their own figures', () => {
+  const { GRADES: G } = require('../data/ucla-grades.js'), v = Object.values(G.c), ps = v.flatMap(e => e.p || []);
+  assert.match(G.term, /^\d\d[FWS]$/); assert.ok(statSync(new URL('../data/ucla-grades.js', import.meta.url)).size < 2e6);
+  for (const k of Object.keys(G.c)) assert.ok(D[k], k);
+  for (const e of [...v, ...ps]) if ('n' in e || 'a' in e) assert.ok(e.n >= 10 && e.a >= 0 && e.a <= 100, JSON.stringify(e));
+  assert.ok(v.filter(e => e.n).length > 3000); assert.ok(ps.length > 1000); assert.ok(ps.filter(p => p.n).length > ps.length / 3);
+  assert.ok(G.c['MATH 32A'].a > 10 && G.c['MATH 32A'].a < 70 && G.c['MATH 32A'].n > 5000);
+});
 console.log(`${n} coursedb tests passed`);

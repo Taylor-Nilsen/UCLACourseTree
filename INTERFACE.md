@@ -201,6 +201,14 @@ before and after). "What to take next" alternates drag onto a top class (`swapIn
 group when it is an unselected option). Plan chips: » defers, ≠ starts conflict mode (then click a class in the same quarter); a red `*` in the upper-left corner marks
 `critical` (also on Tree nodes; a black `*` in the export).
 
+### Grades (`window.GRADES`, data/ucla-grades.js)
+`GRADES = { term: '27W', c: { [code]: { a?, n?, p?: [{ name, a?, n? }] } } }` (see README "Grade data").
+`MODEL.gradeFor(code, term?) -> { a, n, prof: string|null, profs, text } | null`. When `term` (DARS form, `'WI27'`) is `GRADES.term`
+and a listed instructor has past grades in the course, `a`/`n`/`prof` are the best such instructor's; otherwise the all-instructor
+figure. `text` reads "A's: Henary, M. 61%, Pang, J. 62%, all instructors 64%". `nextQuarter` puts `grade` (that object or null) on every
+pick, alt and option, and orders options of one requirement (`options`, `same` alts, an undecided group's entries in the pool) by `a`
+descending, no data last. The order of `picks` and of the pool across requirements does not use grades.
+
 ### Additions for real L&S audits
 - A group with a `SELECT FROM` and no `NEEDS` line gets `needCourses` from its title's count word minus applied courses (min 1). A group whose `NEEDS` has units but no course count carries `unitsOnly: true` and is not used as a course-count check.
 - Substitutions: when a `satisfied` group's title names courses ("STATISTICS 12, 13, OR LIFE SCIENCE 40") and none of them is taken, `build` adds them to `parsed.taken` as copies of the applied course with `subst: <that course>`. They count as met prerequisites, are not nodes and are not counted in units.

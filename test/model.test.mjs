@@ -470,4 +470,20 @@ t('real L&S transfer audit: substitutions, classes enrolled ahead, GE slots list
   const both = ha.options.find(c => dv.options.includes(c)), dbl = MODEL.build(R, { ...opts, choices: { [ha.key]: [both] } });
   assert.deepEqual(dbl.groups.find(g => g.key === dv.key).chosen.map(c => c.code), [both]);
 });
+t("grades: A percentage orders one requirement's options; a listed instructor's own figure is used for that term only", () => {
+  const { GRADES } = require('../data/ucla-grades.js');
+  GRADES.term = '27W';
+  Object.assign(GRADES.c, { 'ZZ 11': { a: 40, n: 100 }, 'ZZ 12': { a: 30, n: 200, p: [{ name: 'Bruin, J.', a: 80, n: 50 }, { name: 'New, N.' }] } });
+  assert.equal(MODEL.gradeFor('ZZ 10', 'WI27'), null);
+  assert.deepEqual([MODEL.gradeFor('ZZ 12', 'WI27').a, MODEL.gradeFor('ZZ 12', 'WI27').prof], [80, 'Bruin, J.']);
+  assert.equal(MODEL.gradeFor('ZZ 12', 'WI27').text, "A's: Bruin, J. 80%, New, N. no past grades, all instructors 30%");
+  assert.deepEqual([MODEL.gradeFor('ZZ 12', 'SP27').a, MODEL.gradeFor('ZZ 12', 'SP27').prof, MODEL.gradeFor('ZZ 12', 'SP27').text], [30, null, "A's: all instructors 30%"]);
+  const p = synth([['PICK', 1, [zz('ZZ 10'), zz('ZZ 11'), zz('ZZ 12')]], ['REQ', 2, [zz('ZZ 13'), zz('ZZ 14')]]]);
+  const key = MODEL.build(p, {}).groups[0].key, mm = MODEL.build(p, { perQuarter: 3, choices: { [key]: ['ZZ 10'] } });
+  const x = MODEL.nextQuarter(mm, 'WI27').picks.find(x => x.code === 'ZZ 10');
+  assert.deepEqual(x.alts.map(a => [a.code, a.grade.a]), [['ZZ 12', 80], ['ZZ 11', 40]]); assert.equal(x.grade, null);
+  const slot = MODEL.nextQuarter(MODEL.build(p, { perQuarter: 3 })).picks.find(x => x.slot);
+  assert.deepEqual(slot.options.map(o => o.code), ['ZZ 12', 'ZZ 11', 'ZZ 10']); // no grade data goes last
+  assert.deepEqual(slot.alts.map(a => a.code), ['ZZ 12', 'ZZ 11', 'ZZ 10']);
+});
 console.log(n + ' passed');
