@@ -140,6 +140,9 @@
   const isGEpc = pc => pc.paths.every(p => p.placeholder);
   const pathNeeds = p => p.ready ? 'prereqs met' : `needs ${p.unmet} prereq${p.unmet === 1 ? '' : 's'}`;
   const isPinned = (key, code) => (S.opts.choices[key] || []).includes(code);
+  // the requirement a course is your selection for (a GE list, a select-N-of-M, an "A OR B" slot), wherever the course is drawn
+  const selKey = code => Object.keys(S.opts.choices).find(k => !k.startsWith('path:') && S.opts.choices[k].includes(code));
+  const unselAttrs = code => `data-act="unselect" data-key="${esc(selKey(code))}" data-code="${esc(code)}" aria-label="Unselect ${esc(code)}" title="Unselect: put this requirement's choice back"`;
   const isGE = n => { const g = n.groupKey && groupByKey(n.groupKey); return !!(g && g.placeholder); };
   // "Fall, Spring (24F, 25S, 25F)" from the Schedule of Classes; "Not offered since ..." when it had no sections
   const qtrs = o => o.split('').map(q => QTR[q] || q).join(', ');
@@ -445,6 +448,7 @@
         <text class="ttl" x="10" y="42">${esc(trunc(n.title, ready ? 20 : n.status === "placeholder" ? 27 : 31))}</text>${ready ? `<text class="rdy" x="${NW - 10}" y="42" text-anchor="end">ready now</text>` : ''}
         ${chip ? `<rect class="chip" x="${NW - cw - 8}" y="9" width="${cw}" height="17" rx="8.5"/><text class="chipt" x="${NW - 8 - cw / 2}" y="21" text-anchor="middle">${esc(chip)}</text>` : ''}
         ${pf ? pickTag(pf, NW, p.h - 24 - (fp ? TAGH : 0)) : ''}${fp ? pathTag(fp, NW, p.h) : ''}
+        ${selKey(n.code) ? `<g class="pbtn unsel" ${unselAttrs(n.code)} transform="translate(${NW - 9},-9)" tabindex="0" role="button"><title>Unselect ${esc(n.code)}</title><circle cx="9" cy="9" r="9"/><text x="9" y="13" text-anchor="middle">×</text></g>` : ''}
       </g>`;
     }).join('');
     const cs = cgroups.map(g => choiceSvg(g, cpos[g.key])).join('') + pcs().filter(pc => pos['PATH: ' + pc.key]).map(pc => pathSvg(pc, pos['PATH: ' + pc.key], nm)).join('');
@@ -483,7 +487,7 @@
   function courseChip(c, term, nm, attrs) {
     const n = nm[c] || {}, cf = S.conflictFrom, real = !isSlotCode(c), target = real && cf && cf.term === term && cf.code !== c;
     const crit = n.critical ? `<span class="crit" role="img" aria-label="${esc(critText(n))}" title="${esc(critText(n))}">*</span>` : '';
-    const acts = real ? `<span class="pacts"><button type="button" class="pact" data-defer="${esc(c)}" aria-label="Defer ${esc(c)} to the next quarter it is offered" title="Defer to the next quarter it is offered">»</button><button type="button" class="pact" data-conflict="${esc(c)}" data-term="${esc(term)}" aria-label="Conflict: mark a class that clashes with ${esc(c)} in ${esc(term)}" title="Conflict…">≠</button></span>` : '';
+    const acts = real ? `<span class="pacts"><button type="button" class="pact" data-defer="${esc(c)}" aria-label="Defer ${esc(c)} to the next quarter it is offered" title="Defer to the next quarter it is offered">»</button><button type="button" class="pact" data-conflict="${esc(c)}" data-term="${esc(term)}" aria-label="Conflict: mark a class that clashes with ${esc(c)} in ${esc(term)}" title="Conflict…">≠</button>${selKey(c) ? `<button type="button" class="pact" ${unselAttrs(c)}>×</button>` : ''}</span>` : '';
     return `<div class="pwrap${target ? ' target' : ''}${cf && cf.code === c && cf.term === term ? ' source' : ''}"${attrs ? ' draggable="true" ' + attrs : ''}>${crit}<button class="pchip s-${esc(n.status || '')}" data-node="${esc(c)}"${target ? ` data-cpick="${esc(c)}" aria-label="${esc(c + ' conflicts with ' + cf.code)}"` : ''}><b>${esc(c)}</b><span>${esc(titleOf(c, nm))}</span><small>${esc(n.units ?? '')} u</small></button>${acts}</div>`;
   }
   function renderCfStatus() {
@@ -652,14 +656,14 @@
     if (pc) { d.innerHTML = pathDetail(pc, nm); d.hidden = false; return; }
     if (!grp && !n) { d.hidden = true; S.detail = null; return; }
     if (grp) { d.innerHTML = groupDetail(grp, nm); d.hidden = false; return; }
-    const g = n.groupKey && groupByKey(n.groupKey), pinned = g && isPinned(g.key, n.code);
+    const g = n.groupKey && groupByKey(n.groupKey), pinned = !!selKey(n.code);
     const off = course(n.code) ? offeredText(n.code) : n.offered ? qtrs(n.offered) : 'Not currently offered';
     const pre = preHtml(n.prereqs, nm);
     d.innerHTML = `<button class="close" data-close aria-label="Close">×</button>
       <h2>${pinned ? PIN + ' ' : ''}${esc(n.code)}</h2><p>${esc(n.title)}</p>
       ${n.fromPath && takenPathOf(n.groupKey) ? partOf(takenPathOf(n.groupKey)) : ''}
       ${n.pickedFor && groupByKey(n.pickedFor) ? `<p class="small">Selected for: ${esc(groupByKey(n.pickedFor).name)} <button class="btn sm" data-group="${esc(n.pickedFor)}">Change selection</button></p>` : ''}
-      ${pinned ? `<p><button class="btn sm" data-act="unselect" data-key="${esc(g.key)}" data-code="${esc(n.code)}">Unselect</button></p>` : ''}
+      ${pinned ? `<p><button class="btn sm" ${unselAttrs(n.code)}>Unselect</button></p>` : ''}
       <dl><dt>Status</dt><dd><i class="badge s-${esc(n.status)}">${esc(STATUS[n.status] || n.status)}</i></dd>
       <dt>Units</dt><dd>${esc(n.units)}</dd>
       ${n.term ? `<dt>Taken</dt><dd>${esc(n.term)}</dd>` : ''}${n.planned ? `<dt>Planned</dt><dd>${esc(n.planned)}${n.critical ? ` <span class="crit-t">* ${esc(critText(n))}</span>` : n.slack ? ` <small class="muted">(can slip ${esc(n.slack)}${n.slack >= 4 ? '+' : ''} offered quarter${n.slack === 1 ? '' : 's'})</small>` : ''}</dd>` : ''}

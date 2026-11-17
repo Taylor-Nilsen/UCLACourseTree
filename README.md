@@ -45,6 +45,7 @@ Tests: `npm test` (needs Node, no dependencies).
 - To fill a GE slot, click it (in the tree, the Quarter plan or What to take next). The panel lists the courses on that requirement's list you could take in the slot's quarter (offered then, prerequisites done by then) and, below, the full list with a filter by code or title. Selecting a course from a quarter's list plans it for that quarter; from then on it is a normal course with prerequisites, defer, conflict and drag. Until you select, What to take next shows the same per-quarter list under each open slot.
 - Diversity, American History and Institutions, ethics and writing requirements are satisfied automatically by a course you selected for another requirement when it is on their list.
 - Classes you are already enrolled in for a later quarter show in that quarter as "enrolled" and take seats there.
+- To undo a selection (a GE course, a technical breadth or elective pick, an "A or B" slot), use the × on that class: on its box in the tree (top-right corner), next to » and ≠ on its chip in the Quarter plan and What to take next, or the Unselect button in its detail panel. The requirement goes back to an open slot.
 - Selections are saved in your browser.
 
 ## Adjusting the quarter plan
