@@ -186,9 +186,11 @@ button, input { font: inherit; color: inherit; }
 .pchip.choose b { display: block; font-size: 13px; overflow-wrap: anywhere; }
 .pwrap { position: relative; }
 .pwrap .pchip { padding-right: 56px; }
-.pacts { position: absolute; top: 4px; right: 4px; display: flex; gap: 2px; opacity: 0; transition: opacity .1s; }
-.pwrap:hover .pacts, .pwrap:focus-within .pacts, .pwrap.source .pacts { opacity: 1; }
-@media (hover: none) { .pacts { opacity: 1; } }
+.pacts { position: absolute; top: 4px; right: 4px; display: flex; gap: 2px; }
+.pacts .pact { opacity: 0; transition: opacity .1s; }
+/* » and ≠ show on hover; the × of a class you selected is always there */
+.pwrap:hover .pact, .pwrap:focus-within .pact, .pwrap.source .pact, .pact[data-act] { opacity: 1; }
+@media (hover: none) { .pacts .pact { opacity: 1; } }
 .pact { width: 24px; height: 22px; padding: 0; border: 1px solid var(--line); border-radius: 5px; background: var(--card); cursor: pointer; font-size: 13px; line-height: 1; }
 .pact:hover, .pact:focus-visible { border-color: var(--accent); outline: none; }
 .pwrap.source .pchip { outline: 2px solid var(--accent); }

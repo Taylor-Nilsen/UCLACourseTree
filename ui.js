@@ -663,7 +663,7 @@
       <h2>${pinned ? PIN + ' ' : ''}${esc(n.code)}</h2><p>${esc(n.title)}</p>
       ${n.fromPath && takenPathOf(n.groupKey) ? partOf(takenPathOf(n.groupKey)) : ''}
       ${n.pickedFor && groupByKey(n.pickedFor) ? `<p class="small">Selected for: ${esc(groupByKey(n.pickedFor).name)} <button class="btn sm" data-group="${esc(n.pickedFor)}">Change selection</button></p>` : ''}
-      ${pinned ? `<p><button class="btn sm" ${unselAttrs(n.code)}>Unselect</button></p>` : ''}
+      ${pinned ? `<p><button class="btn primary" ${unselAttrs(n.code)}>Unselect this class</button></p>` : ''}
       <dl><dt>Status</dt><dd><i class="badge s-${esc(n.status)}">${esc(STATUS[n.status] || n.status)}</i></dd>
       <dt>Units</dt><dd>${esc(n.units)}</dd>
       ${n.term ? `<dt>Taken</dt><dd>${esc(n.term)}</dd>` : ''}${n.planned ? `<dt>Planned</dt><dd>${esc(n.planned)}${n.critical ? ` <span class="crit-t">* ${esc(critText(n))}</span>` : n.slack ? ` <small class="muted">(can slip ${esc(n.slack)}${n.slack >= 4 ? '+' : ''} offered quarter${n.slack === 1 ? '' : 's'})</small>` : ''}</dd>` : ''}
