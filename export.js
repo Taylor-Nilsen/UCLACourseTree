@@ -116,7 +116,7 @@
         const s = slotInfo(it.code, model);
         return `<g class="slot"><rect x="${X}" y="${Y}" width="${BW}" height="${BH}"/><text x="${X + 6}" y="${Y + 14}" class="code">${esc(s.kind === 'GE' ? 'GE' : 'Choose' + ((/ #\d+/.exec(it.code) || [''])[0]))}</text><text x="${X + 6}" y="${Y + 27}" class="t">${esc(trunc(s.name.replace(/ #\d+$/, ''), 30))}</text></g>`;
       }
-      const comp = ['done', 'ip'].includes(n.status), sub = it.c === 0 && !comp ? 'planned ' + termLabel(n.planned) : n.status === 'ip' ? 'in progress' : n.title;
+      const comp = ['done', 'ip'].includes(n.status), sub = it.c === 0 && !comp ? 'planned ' + termLabel(n.planned) : n.status === 'ip' ? (n.enrolled ? 'enrolled ' + termLabel(n.term) : 'in progress') : n.title;
       return `<g class="box${comp ? ' done' : ''}" data-code="${esc(it.code)}" data-col="${it.c}"><rect x="${X}" y="${Y}" width="${BW}" height="${BH}"/>${n.critical && it.c ? `<text x="${X + 1.5}" y="${Y + 8}" class="crit">*</text>` : ''}<text x="${X + 6}" y="${Y + 14}" class="code">${esc(it.code)}</text><text x="${X + 6}" y="${Y + 27}" class="t">${esc(trunc(sub, 29))}</text></g>`;
     };
     const heads = cols.map((list, c) => c === 0 ? (list.length ? (page ? 'Completed / earlier' : 'Completed') : '') : termLabel(terms[a + c - 2]))

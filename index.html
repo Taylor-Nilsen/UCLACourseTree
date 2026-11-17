@@ -116,6 +116,8 @@ button, input { font: inherit; color: inherit; }
 .node .chipt { font-size: 10px; fill: var(--fg); }
 .s-done .box { fill: var(--done-bg); stroke: var(--done); }
 .s-ip .box { fill: var(--ip-bg); stroke: var(--ip); }
+.s-enrolled .box { fill: var(--ip-bg); stroke: var(--ip); stroke-dasharray: 6 3; }
+.node .enr { fill: var(--ip); font-size: 10px; font-weight: 700; }
 .s-ready .box { fill: var(--ready-bg); stroke: var(--ready); stroke-width: 2.5; }
 .node .rdy { fill: var(--ready); font-size: 10px; font-weight: 700; }
 .s-locked .box { fill: var(--locked-bg); stroke: var(--locked); stroke-dasharray: 5 4; }
@@ -164,6 +166,7 @@ button, input { font: inherit; color: inherit; }
 .legend i { display: inline-block; width: 14px; height: 10px; border-radius: 3px; border: 1.5px solid; vertical-align: -1px; margin-right: 4px; }
 .legend .s-done { background: var(--done-bg); border-color: var(--done); }
 .legend .s-ip { background: var(--ip-bg); border-color: var(--ip); }
+.legend .s-enrolled { background: var(--ip-bg); border-color: var(--ip); border-style: dashed; }
 .legend .s-ready { background: var(--ready-bg); border-color: var(--ready); }
 .legend .s-locked { background: var(--locked-bg); border: 1.5px dashed var(--locked); }
 .legend .s-placeholder { background: var(--ph-bg); border: 1.5px dashed var(--ph); }
@@ -248,7 +251,7 @@ button, input { font: inherit; color: inherit; }
 .optd div { margin-top: 2px; } .prelist li { margin-bottom: 4px; }
 .pre { white-space: nowrap; }
 .badge { font-style: normal; font-size: 11px; padding: 1px 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); }
-.badge.s-done { background: var(--done-bg); border-color: var(--done); } .badge.s-ip { background: var(--ip-bg); border-color: var(--ip); }
+.badge.s-done { background: var(--done-bg); border-color: var(--done); } .badge.s-ip { background: var(--ip-bg); border-color: var(--ip); } .badge.s-enrolled { background: var(--ip-bg); border-color: var(--ip); border-style: dashed; }
 .badge.s-ready { border-color: var(--ready); } .badge.s-locked { border-style: dashed; } .badge.s-placeholder { background: var(--ph-bg); border-color: var(--ph); }
 .dismiss { position: absolute; top: 4px; right: 6px; width: 24px; height: 24px; border: 0; border-radius: 6px; background: none; color: inherit; font-size: 18px; line-height: 1; cursor: pointer; opacity: .7; }
 .dismiss:hover, .dismiss:focus-visible { opacity: 1; background: rgba(0,0,0,.08); }
@@ -289,7 +292,7 @@ button, input { font: inherit; color: inherit; }
         <div class="zoom"><button data-zoom="-1" aria-label="Zoom out">−</button><span id="zoomv">100%</span><button data-zoom="1" aria-label="Zoom in">+</button></div>
         <div id="tree" class="scroll"></div>
         <div class="legend">
-          <span><i class="s-done"></i>done</span><span><i class="s-ip"></i>in progress</span><span><i class="s-ready"></i>ready now</span>
+          <span><i class="s-done"></i>done</span><span><i class="s-ip"></i>in progress</span><span><i class="s-enrolled"></i>enrolled for a later quarter</span><span><i class="s-ready"></i>ready now</span>
           <span><i class="s-locked"></i>locked</span><span><i class="s-placeholder"></i>GE / elective slot</span><span><i class="s-choice"></i>your selection (green dot: prereqs met)</span><span><i class="s-path"></i>select one of several options</span><span><i class="blk"></i>blocking prerequisite</span><span><b class="crit-t">*</b> must be taken in its planned quarter</span>
         </div>
       </section>

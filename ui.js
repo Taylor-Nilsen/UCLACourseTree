@@ -53,7 +53,7 @@
   if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
   const NW = 200, NH = 56, COLW = 340, ROWH = 110, PAD = 40, CW = 240, CHIPW = 108, MAXCHIPS = 8, PW = 300, PROW = 46, TAGH = 22;
-  const STATUS = { done: 'Completed', ip: 'In progress', ready: 'Ready now', locked: 'Locked', placeholder: 'GE / elective slot', path: 'Select one' };
+  const STATUS = { done: 'Completed', ip: 'In progress', enrolled: 'Enrolled', ready: 'Ready now', locked: 'Locked', placeholder: 'GE / elective slot', path: 'Select one' };
   const QTR = { F: 'Fall', W: 'Winter', S: 'Spring' };
   const PIN_D = 'M10 1l5 5-2 1-3 3 .5 3.5L9 15l-3-3-4 4-1-1 4-4-3-3 1.5-1.5L7 6l3-3z';
   const PIN = '<svg class="selicon" viewBox="0 0 16 16" aria-label="selected"><path d="M10 1l5 5-2 1-3 3 .5 3.5L9 15l-3-3-4 4-1-1 4-4-3-3 1.5-1.5L7 6l3-3z" fill="currentColor"/></svg>';
@@ -115,8 +115,12 @@
   // ---------- lookups ----------
   const nodeMap = () => Object.fromEntries(S.model.nodes.map(n => [n.code, n]));
   const groupByKey = k => S.model.groups.find(g => g.key === k);
+  // status as shown: a class registered for a later quarter is "enrolled", not "in progress"
+  const shown = n => n.enrolled ? 'enrolled' : n.status;
+  const enrolledAhead = c => { const t = S.parsed.taken[c]; return !!t && (t.status || (t.grade === 'IP' ? 'ip' : 'done')) === 'ip' && DARS.termIndex(t.term) > DARS.termIndex(S.parsed.currentTerm); };
   function statusOf(code, nodes) {
-    if (nodes[code]) return nodes[code].status;
+    if (nodes[code]) return shown(nodes[code]);
+    if (enrolledAhead(code)) return 'enrolled';
     const t = S.parsed.taken[code]; // AP/transfer placeholders are already mapped to real courses by the parser (via)
     const st = t && (t.status || (t.grade === 'IP' ? 'ip' : 'done'));
     return st === 'done' || st === 'ip' ? st : 'none'; // failed / withdrawn / incomplete attempts do not count
@@ -253,7 +257,7 @@
   const termOptions = (x, term) => !x || !x.options.length ? '' : `<details class="alts" open><summary>${x.options.length} course${x.options.length === 1 ? '' : 's'} you could take in ${esc(term)}, most A's first${x.options.some(o => o.seats) ? ', full classes last' : ''}</summary><div class="optlist tall">` +
     x.options.slice(0, 200).map(o => optRow(x.groupKey, o.code, `${o.rec ? 'recommended · ' : ''}${seatTag(o)}${o.title} · ${o.units} u${o.grade ? ' · ' + o.grade.text : ''}`, 'select', o.rec ? 'rec' : '', undefined, term)).join('') +
     (x.options.length > 200 ? `<p class="muted small">Showing 200 of ${x.options.length}. Open the slot to filter the full list.</p>` : '') + '</div></details>';
-  const enrolledChips = (t, nm) => (t.enrolled || []).map(c => `<button class="pchip s-ip" data-node="${esc(c)}" title="Already enrolled for ${esc(t.term)}"><b>${esc(c)}</b><span>${esc(titleOf(c, nm))}</span><small>${esc((nm[c] || {}).units ?? '')} u · enrolled</small></button>`).join('');
+  const enrolledChips = (t, nm) => (t.enrolled || []).map(c => `<button class="pchip s-enrolled" data-node="${esc(c)}" title="Already enrolled for ${esc(t.term)}"><b>${esc(c)}</b><span>${esc(titleOf(c, nm))}</span><small>${esc((nm[c] || {}).units ?? '')} u · enrolled</small></button>`).join('');
   function optionList(g) {
     const q = (S.filters[g.key] || '').trim().toUpperCase(), pinned = S.opts.choices[g.key] || [];
     const hits = (g.options || []).filter(c => !q || c.includes(q) || ((course(c) || {}).t || '').toUpperCase().includes(q));
@@ -441,11 +445,11 @@
     const ns = nodes.filter(n => n.status !== 'path').concat(lane).map(n => {
       const p = pos[n.code], chip = n.planned || n.term || '', ready = n.status === 'ready', pinned = n.groupKey && isPinned(n.groupKey, n.code);
       const cw = chip ? chip.length * 6.2 + 12 : 0, label = n.code.startsWith('CHOOSE: ') ? 'choose: ' + n.title : n.code, fp = n.fromPath && pcByKey(n.fromPath), pf = n.pickedFor && groupByKey(n.pickedFor);
-      return `<g class="node s-${esc(n.status)}${S.detail === n.code ? ' sel' : ''}" data-node="${esc(n.code)}" transform="translate(${p.x},${p.y})" tabindex="0" role="button" aria-label="${esc(n.code + ', ' + (STATUS[n.status] || n.status) + (pinned ? ', selected' : '') + (n.critical ? '. ' + critText(n) : ''))}">
+      return `<g class="node s-${esc(shown(n))}${S.detail === n.code ? ' sel' : ''}" data-node="${esc(n.code)}" transform="translate(${p.x},${p.y})" tabindex="0" role="button" aria-label="${esc(n.code + ', ' + (STATUS[shown(n)] || n.status) + (pinned ? ', selected' : '') + (n.critical ? '. ' + critText(n) : ''))}">
         <title>${esc(n.code + ' — ' + n.title + (n.critical ? '\n* ' + critText(n) : ''))}</title><rect class="box" width="${NW}" height="${p.h}" rx="8"/>${n.critical ? '<text class="crit" x="-7" y="13" aria-hidden="true">*</text>' : ''}
         ${pinned ? `<path class="pinp" transform="translate(8,10) scale(.8)" d="${PIN_D}"/>` : ''}
         <text class="code" x="${pinned ? 24 : 10}" y="22">${esc(trunc(label, Math.floor((NW - cw - (pinned ? 32 : 18)) / 7.8)))}</text>
-        <text class="ttl" x="10" y="42">${esc(trunc(n.title, ready ? 20 : n.status === "placeholder" ? 27 : 31))}</text>${ready ? `<text class="rdy" x="${NW - 10}" y="42" text-anchor="end">ready now</text>` : ''}
+        <text class="ttl" x="10" y="42">${esc(trunc(n.title, ready || n.enrolled ? 20 : n.status === "placeholder" ? 27 : 31))}</text>${ready ? `<text class="rdy" x="${NW - 10}" y="42" text-anchor="end">ready now</text>` : n.enrolled ? `<text class="enr" x="${NW - 10}" y="42" text-anchor="end">enrolled</text>` : ''}
         ${chip ? `<rect class="chip" x="${NW - cw - 8}" y="9" width="${cw}" height="17" rx="8.5"/><text class="chipt" x="${NW - 8 - cw / 2}" y="21" text-anchor="middle">${esc(chip)}</text>` : ''}
         ${pf ? pickTag(pf, NW, p.h - 24 - (fp ? TAGH : 0)) : ''}${fp ? pathTag(fp, NW, p.h) : ''}
         ${selKey(n.code) ? `<g class="pbtn unsel" ${unselAttrs(n.code)} transform="translate(${NW - 9},-9)" tabindex="0" role="button"><title>Unselect ${esc(n.code)}</title><circle cx="9" cy="9" r="9"/><text x="9" y="13" text-anchor="middle">×</text></g>` : ''}
@@ -488,7 +492,7 @@
     const n = nm[c] || {}, cf = S.conflictFrom, real = !isSlotCode(c), target = real && cf && cf.term === term && cf.code !== c;
     const crit = n.critical ? `<span class="crit" role="img" aria-label="${esc(critText(n))}" title="${esc(critText(n))}">*</span>` : '';
     const acts = real ? `<span class="pacts"><button type="button" class="pact" data-defer="${esc(c)}" aria-label="Defer ${esc(c)} to the next quarter it is offered" title="Defer to the next quarter it is offered">»</button><button type="button" class="pact" data-conflict="${esc(c)}" data-term="${esc(term)}" aria-label="Conflict: mark a class that clashes with ${esc(c)} in ${esc(term)}" title="Conflict…">≠</button>${selKey(c) ? `<button type="button" class="pact" ${unselAttrs(c)}>×</button>` : ''}</span>` : '';
-    return `<div class="pwrap${target ? ' target' : ''}${cf && cf.code === c && cf.term === term ? ' source' : ''}"${attrs ? ' draggable="true" ' + attrs : ''}>${crit}<button class="pchip s-${esc(n.status || '')}" data-node="${esc(c)}"${target ? ` data-cpick="${esc(c)}" aria-label="${esc(c + ' conflicts with ' + cf.code)}"` : ''}><b>${esc(c)}</b><span>${esc(titleOf(c, nm))}</span><small>${esc(n.units ?? '')} u</small></button>${acts}</div>`;
+    return `<div class="pwrap${target ? ' target' : ''}${cf && cf.code === c && cf.term === term ? ' source' : ''}"${attrs ? ' draggable="true" ' + attrs : ''}>${crit}<button class="pchip s-${esc(shown(n) || '')}" data-node="${esc(c)}"${target ? ` data-cpick="${esc(c)}" aria-label="${esc(c + ' conflicts with ' + cf.code)}"` : ''}><b>${esc(c)}</b><span>${esc(titleOf(c, nm))}</span><small>${esc(n.units ?? '')} u</small></button>${acts}</div>`;
   }
   function renderCfStatus() {
     const cf = S.conflictFrom;
@@ -628,7 +632,7 @@
       ${takenPathOf(g.key) ? partOf(takenPathOf(g.key)) : ''}
       ${g.selected === false && pcOfGroup(g.key) ? `<p class="small">One path of ${esc(pcOfGroup(g.key).title)}. Selecting an option here selects this path. <a href="#" data-path="${esc(pcOfGroup(g.key).key)}">Compare paths</a></p>` : ''}
       ${recs.length ? `<p class="small"><b>Recommended: ${esc(recs.join(', '))}</b>. Most A's among the options you can take in the quarter the open slot is planned for.</p>` : ''}
-      <p class="small muted">Green dot: prerequisites done, in progress or selected. Grey: something is still missing.</p>${rows}`;
+      <p class="small muted">Green dot: prerequisites done, in progress or selected. Grey: something is still missing (a class you are only enrolled in for a later quarter is not done yet).</p>${rows}`;
   }
 
   function pathDetail(pc, nm) {
@@ -664,9 +668,9 @@
       ${n.fromPath && takenPathOf(n.groupKey) ? partOf(takenPathOf(n.groupKey)) : ''}
       ${n.pickedFor && groupByKey(n.pickedFor) ? `<p class="small">Selected for: ${esc(groupByKey(n.pickedFor).name)} <button class="btn sm" data-group="${esc(n.pickedFor)}">Change selection</button></p>` : ''}
       ${pinned ? `<p><button class="btn primary" ${unselAttrs(n.code)}>Unselect this class</button></p>` : ''}
-      <dl><dt>Status</dt><dd><i class="badge s-${esc(n.status)}">${esc(STATUS[n.status] || n.status)}</i></dd>
+      <dl><dt>Status</dt><dd><i class="badge s-${esc(shown(n))}">${esc(STATUS[shown(n)] || n.status)}</i></dd>
       <dt>Units</dt><dd>${esc(n.units)}</dd>
-      ${n.term ? `<dt>Taken</dt><dd>${esc(n.term)}</dd>` : ''}${n.planned ? `<dt>Planned</dt><dd>${esc(n.planned)}${n.critical ? ` <span class="crit-t">* ${esc(critText(n))}</span>` : n.slack ? ` <small class="muted">(can slip ${esc(n.slack)}${n.slack >= 4 ? '+' : ''} offered quarter${n.slack === 1 ? '' : 's'})</small>` : ''}</dd>` : ''}
+      ${n.term ? `<dt>${n.enrolled ? 'Enrolled for' : 'Taken'}</dt><dd>${esc(n.term)}</dd>` : ''}${n.planned ? `<dt>Planned</dt><dd>${esc(n.planned)}${n.critical ? ` <span class="crit-t">* ${esc(critText(n))}</span>` : n.slack ? ` <small class="muted">(can slip ${esc(n.slack)}${n.slack >= 4 ? '+' : ''} offered quarter${n.slack === 1 ? '' : 's'})</small>` : ''}</dd>` : ''}
       <dt>Offered</dt><dd>${esc(off)}</dd>
       ${MODEL.seatsFor(n.code, n.planned) ? `<dt>Seats</dt><dd>${MODEL.seatsFor(n.code, n.planned) === 'full' ? 'Full' : 'Waitlist only'} in ${esc(n.planned)} <small class="muted">as of ${esc(G.asOf)}; check the Schedule of Classes</small></dd>` : ''}
       ${aText(n.code, n.planned) ? `<dt>Grades</dt><dd>${esc(aText(n.code, n.planned).replace(/^A's: /, ''))}<br><small class="muted">share of past letter grades that were A+, A or A-</small></dd>` : ''}

@@ -29,8 +29,9 @@ Tests: `npm test` (needs Node, no dependencies).
 ## What the colors mean
 
 - Done: you finished the course with a passing grade.
-- In progress: you are enrolled this quarter.
-- Ready: every prerequisite is done or in progress, so you can take it next.
+- In progress: you are taking it this quarter.
+- Enrolled: you are registered for it in a later quarter (dashed outline). It does not count as a finished prerequisite until that quarter is over, so a class that needs it stays Locked.
+- Ready: every prerequisite is done or in progress this quarter, so you can take it next.
 - Locked: at least one prerequisite is still missing.
 - Placeholder: a general education or elective slot with no specific course selected yet.
 

@@ -70,6 +70,9 @@
     }
     const taken = {};
     for (const [c, t] of Object.entries(parsed.taken)) if (['done', 'ip'].includes(st(t))) taken[c] = t;
+    // enrolled ahead: registered for a quarter after the audit's current one (WI27 on a FA26 audit). Not in progress yet, and not a
+    // finished prerequisite for anything until that quarter is over.
+    const later = c => taken[c] && st(taken[c]) === 'ip' && DARS.termIndex(taken[c].term) > DARS.termIndex(parsed.currentTerm);
     const chosenBy = new Map(); // code -> groupKey that plans it
 
     // count checks: compare against the itemized groups of the section right before
@@ -118,7 +121,7 @@
     const writingOpen = () => writingGroups.some(w => !w.chosen.length && !(choices[w.key] || []).length);
     // "ready" = every prereq is done, in progress or pinned (not merely planned)
     const pinned = new Set(pickedBy.keys());
-    const met = c => !!taken[c] || pinned.has(c);
+    const met = c => !!taken[c] && !later(c) || pinned.has(c);
 
     // unmet transitive prereqs; OR-groups take the cheapest alternative
     function unmet(code) {
@@ -260,7 +263,7 @@
       nodes.set(code, Object.assign({ code, title: c ? c.t : t ? t.title : code, units: c ? c.u : t ? t.units : 4, offered: c ? c.off : '?', prereqs: c ? c.pre : [] }, c && c.req && !c.pre.length ? { req: c.req } : {}, extra));
     };
     const viaSrc = new Set(Object.entries(taken).filter(([c, t]) => t.via && COURSES[c]).map(([, t]) => t.via)); // a source stays a node unless a real course stands in for it
-    for (const [code, t] of Object.entries(taken)) if (!t.subst && !viaSrc.has(code) && !(t.via && !COURSES[code])) add(code, { status: st(t), term: t.term });
+    for (const [code, t] of Object.entries(taken)) if (!t.subst && !viaSrc.has(code) && !(t.via && !COURSES[code])) add(code, { status: st(t), term: t.term, ...(later(code) && { enrolled: true }) });
     for (const gr of groups) if (gr.selected) for (const c of gr.chosen) {
       if (c.code.startsWith('GE: ')) add(c.code, { title: gr.name, units: gr._slotUnits, offered: 'FWS', status: 'placeholder', groupKey: gr.key });
       else add(c.code, { groupKey: pickedBy.get(c.code) || chosenBy.get(c.code) || gr.key });
@@ -292,7 +295,7 @@
     }
     pull(pathChoices.filter(open).map(pc => 'PATH: ' + pc.key));
     for (const n of nodes.values()) if (!before.has(n.code) && n.status !== 'path') n.pathPrereq = true;
-    for (const n of nodes.values()) if (!n.status) n.status = n.prereqs.every(grp => grp.some(x => taken[x])) ? 'ready' : 'locked';
+    for (const n of nodes.values()) if (!n.status) n.status = n.prereqs.every(grp => grp.some(x => taken[x] && !later(x))) ? 'ready' : 'locked';
     const edges = [];
     for (const n of nodes.values()) for (const grp of n.prereqs) for (const p of grp) if (nodes.has(p)) edges.push({ from: p, to: n.code });
     // each path's courses in prerequisite order: pre = prereqs present as nodes, after = courses of the same path

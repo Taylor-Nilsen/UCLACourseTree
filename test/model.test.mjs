@@ -521,8 +521,11 @@ t('nextQuarter: a class enrolled for the coming quarter is not a met prerequisit
   const mm = MODEL.build(p, { perQuarter: 2 }), codes = t => MODEL.nextQuarter(mm, t).picks.flatMap(x => [x.code, ...x.alts.map(a => a.code)]);
   assert.deepEqual(mm.plan[0].enrolled, ['ZZ 21']); assert.equal(mm.nodes.find(x => x.code === 'ZZ 22').planned, 'WI28');
   assert.ok(!codes('WI27').includes('ZZ 22'), codes('WI27').join()); assert.ok(codes('WI28').includes('ZZ 22'));
+  // it is "enrolled", not in progress, and what needs it is locked, not ready
+  assert.equal(mm.nodes.find(x => x.code === 'ZZ 21').enrolled, true); assert.equal(mm.nodes.find(x => x.code === 'ZZ 22').status, 'locked');
   const now = synth([['A', 1, [zz('ZZ 22')]], ['B', 2, [zz('ZZ 10'), zz('ZZ 11')]]]); // in progress this quarter: done by next quarter, so it counts
   now.taken = { 'ZZ 21': { term: 'FA26', units: 4, grade: 'IP', status: 'ip', title: 'ZZ 21' } };
-  assert.equal(MODEL.build(now, { perQuarter: 1 }).nodes.find(x => x.code === 'ZZ 22').planned, 'WI27');
+  const nb = MODEL.build(now, { perQuarter: 1 }); assert.equal(nb.nodes.find(x => x.code === 'ZZ 22').planned, 'WI27');
+  assert.equal(nb.nodes.find(x => x.code === 'ZZ 21').enrolled, undefined); assert.equal(nb.nodes.find(x => x.code === 'ZZ 22').status, 'ready');
 });
 console.log(n + ' passed');

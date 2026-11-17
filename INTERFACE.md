@@ -77,6 +77,7 @@ model = {
                                   puts a course past expected graduation that was not, or leaves one unscheduled */,
             criticalWhy?: string /* what slipping it pushes back: "your last quarter to FA29, past expected graduation" | "X past expected graduation" */,
             slack?: number /* planned course: offered quarters it can slip with none of those effects, 0..4 (4 = 4 or more) */,
+            enrolled?: true /* status 'ip' but registered for a quarter after currentTerm: shown as "Enrolled"; it does not make a course ready */,
             prereqs: string[][] }],
   edges: [{ from, to }],            // prerequisite -> course, only between nodes present
   plan:  [{ term: 'WI27', courses: string[], units: number /* of `courses` */, beyondExpected: boolean,
