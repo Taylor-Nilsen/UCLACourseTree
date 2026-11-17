@@ -46,6 +46,7 @@ t('instructors file: every key is a course and lists named instructors for one t
   const { GRADES: G } = require('../data/ucla-instructors.js'), v = Object.values(G.c);
   assert.match(G.term, /^\d\d[FWS]$/); assert.ok(statSync(new URL('../data/ucla-instructors.js', import.meta.url)).size < 1e6);
   for (const k of Object.keys(G.c)) assert.ok(D[k], k);
-  assert.ok(v.length > 1000); assert.ok(v.every(e => e.p.length && e.p.every(p => p.name && !/tentative|staff/i.test(p.name))));
+  assert.ok(v.filter(e => e.p).length > 1000); assert.ok(v.every(e => (e.st || e.p) && (e.p || []).every(p => p.name && !/tentative|staff/i.test(p.name))));
+  assert.match(G.asOf, /^\d{4}-\d\d-\d\d$/); assert.ok(v.every(e => [undefined, 'full', 'wait'].includes(e.st))); assert.ok(v.some(e => e.st === 'full'));
 });
 console.log(`${n} coursedb tests passed`);

@@ -211,7 +211,9 @@
   // Grades come live from uclagrades.com (one small JSON per course, any origin may read it) the first time a course is shown in a
   // place that prints A's; the render that asked is repeated when they arrive. Results are kept in local storage for a week.
   const G = MODEL.GRADES, GC = (c => c && c.term === G.term && Date.now() - c.at < 7 * 864e5 ? c : { term: G.term, at: Date.now(), c: {} })(store.get('dars.grades'));
-  for (const [k, v] of Object.entries(GC.c)) if (v) G.c[k] = v;
+  // only the figures come from the cache: instructor names and seats are whatever the current data/ucla-instructors.js says
+  for (const [k, v] of Object.entries(GC.c)) if (v) { const f = G.c[k] || {}, an = x => x && x.n ? { a: x.a, n: x.n } : {};
+    G.c[k] = { ...f, ...an(v), ...(f.p && { p: f.p.map(p => ({ ...p, ...an((v.p || []).find(q => q.name === p.name)) })) }) }; }
   const asked = new Set(Object.keys(GC.c)); let queue = [], fetching = false;
   function want(code) {
     if (asked.has(code) || !course(code)) return;
@@ -244,8 +246,9 @@
     return r;
   };
   const aText = (code, term) => (want(code), (MODEL.gradeFor(code, term) || {}).text || '');
-  const termOptions = (x, term) => !x || !x.options.length ? '' : `<details class="alts" open><summary>${x.options.length} course${x.options.length === 1 ? '' : 's'} you could take in ${esc(term)}, most A's first</summary><div class="optlist tall">` +
-    x.options.slice(0, 200).map(o => optRow(x.groupKey, o.code, `${o.rec ? 'recommended · ' : ''}${o.title} · ${o.units} u${o.grade ? ' · ' + o.grade.text : ''}`, 'select', o.rec ? 'rec' : '', undefined, term)).join('') +
+  const seatTag = o => o.seats ? `${o.seats} · ` : '';
+  const termOptions = (x, term) => !x || !x.options.length ? '' : `<details class="alts" open><summary>${x.options.length} course${x.options.length === 1 ? '' : 's'} you could take in ${esc(term)}, most A's first${x.options.some(o => o.seats) ? ', full classes last' : ''}</summary><div class="optlist tall">` +
+    x.options.slice(0, 200).map(o => optRow(x.groupKey, o.code, `${o.rec ? 'recommended · ' : ''}${seatTag(o)}${o.title} · ${o.units} u${o.grade ? ' · ' + o.grade.text : ''}`, 'select', o.rec ? 'rec' : '', undefined, term)).join('') +
     (x.options.length > 200 ? `<p class="muted small">Showing 200 of ${x.options.length}. Open the slot to filter the full list.</p>` : '') + '</div></details>';
   const enrolledChips = (t, nm) => (t.enrolled || []).map(c => `<button class="pchip s-ip" data-node="${esc(c)}" title="Already enrolled for ${esc(t.term)}"><b>${esc(c)}</b><span>${esc(titleOf(c, nm))}</span><small>${esc((nm[c] || {}).units ?? '')} u · enrolled</small></button>`).join('');
   function optionList(g) {
@@ -499,7 +502,7 @@
     $('#nextterm').innerHTML = r.terms.map(t => `<option value="${esc(t)}"${t === r.term ? ' selected' : ''}>${esc(t)}${t === r.terms[0] ? ' (next)' : ''}</option>`).join('');
     const alt = a => {
       const open = nm[a.code] ? `data-node="${esc(a.code)}"` : a.groupKey ? `data-group="${esc(a.groupKey)}"` : '';
-      return `<a href="#" class="nalt" draggable="true" data-drag="${esc(a.code)}"${a.groupKey && !nm[a.code] ? ` data-gk="${esc(a.groupKey)}"` : ''} ${open}><b>${esc(a.code)}</b><span>${esc(a.title)}</span><small>${esc(a.why)}</small>${a.grade ? `<small>${esc(a.grade.text)}</small>` : ''}</a>`;
+      return `<a href="#" class="nalt" draggable="true" data-drag="${esc(a.code)}"${a.groupKey && !nm[a.code] ? ` data-gk="${esc(a.groupKey)}"` : ''} ${open}><b>${esc(a.code)}</b><span>${esc(a.title)}</span><small>${esc(a.why)}${a.seats ? ' · ' + esc(a.seats) + ' only' : ''}</small>${a.grade ? `<small>${esc(a.grade.text)}</small>` : ''}</a>`;
     };
     const pt = (S.model.plan || []).find(t => t.term === r.term) || {};
     $('#next').innerHTML = ((pt.enrolled || []).length ? `<div class="ncol"><div class="nrank">already enrolled</div>${enrolledChips(pt, nm)}</div>` : '') + r.picks.map((x, i) => {
@@ -661,6 +664,7 @@
       <dt>Units</dt><dd>${esc(n.units)}</dd>
       ${n.term ? `<dt>Taken</dt><dd>${esc(n.term)}</dd>` : ''}${n.planned ? `<dt>Planned</dt><dd>${esc(n.planned)}${n.critical ? ` <span class="crit-t">* ${esc(critText(n))}</span>` : n.slack ? ` <small class="muted">(can slip ${esc(n.slack)}${n.slack >= 4 ? '+' : ''} offered quarter${n.slack === 1 ? '' : 's'})</small>` : ''}</dd>` : ''}
       <dt>Offered</dt><dd>${esc(off)}</dd>
+      ${MODEL.seatsFor(n.code, n.planned) ? `<dt>Seats</dt><dd>${MODEL.seatsFor(n.code, n.planned) === 'full' ? 'Full' : 'Waitlist only'} in ${esc(n.planned)} <small class="muted">as of ${esc(G.asOf)}; check the Schedule of Classes</small></dd>` : ''}
       ${aText(n.code, n.planned) ? `<dt>Grades</dt><dd>${esc(aText(n.code, n.planned).replace(/^A's: /, ''))}<br><small class="muted">share of past letter grades that were A+, A or A-</small></dd>` : ''}
       ${g ? `<dt>Satisfies</dt><dd>${esc(g.name)}<br><small class="muted">${esc(g.section)}</small></dd>` : ''}</dl>
       ${g && !g.placeholder && (g.choice || (g.altGroupKeys || []).length) ? `<p><a href="#" data-group="${esc(g.key)}">All options for this requirement</a></p>` : ''}

@@ -213,6 +213,10 @@ pick, alt and option, and orders options of one requirement (`options`, `same` a
 descending, no data last. The order of `picks` and of the pool across requirements does not use grades.
 Recommendations: an open-slot pick carries `rec: code|null`, and that option has `rec: true`. It is the first of `options` (most A's
 that can be taken that quarter) not already recommended to an earlier slot of the quarter, and null when that option has no grade.
+Seats: `MODEL.seatsFor(code, term) -> 'full' | 'waitlist' | null` from `st` (`'full'` / `'wait'`) on a course in `GRADES.c`, only for
+`GRADES.term`; `GRADES.asOf` dates it. Picks, alts and options carry `seats`. A full course is never an alt and never `rec`; options
+of one requirement sort open, then waitlist, then full, before A's; a planned pick's `why` ends "full as of <date>" / "waitlist only
+as of <date>". `gradeFor` ranks on the best instructor by (open, waitlist, full), then A's, and tags full ones in `text`.
 `MODEL.recommend(model, groupKey, opts) -> string[]` collects the `rec` of each of the group's open slots in the quarter it is planned
 for. The model still selects nothing; path choices get no recommendation.
 

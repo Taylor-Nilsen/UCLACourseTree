@@ -2,7 +2,8 @@
 
 ## build-instructors.mjs
 
-Regenerates `data/ucla-instructors.js` (the instructors the Schedule of Classes lists for the next term). Grades need no build:
+Regenerates `data/ucla-instructors.js` (the instructors the Schedule of Classes lists for the next term, and which courses and
+instructors have no open section). Grades need no build:
 the browser reads them from uclagrades.com.
 
 ```
@@ -11,11 +12,15 @@ node scripts/build-instructors.mjs --term 27W --cache ./instructors-cache
 ```
 
 Plain Node 22, no dependencies. Run it after `build-course-db.mjs`, and again when the Schedule of Classes publishes
-instructors for a new term. About 2,200 requests, 5 minutes cold. Delete the cache to refetch.
+instructors for a new term. About 2,200 requests, 5 minutes cold. Seats change by the hour during enrollment: delete the cache
+and rerun whenever you want a fresh snapshot (the file records its date as `asOf`).
 
 - For each subject, the `CourseTitlesView` pages of the term, then one `/Results/GetCourseSummary?model=...` per course (the
   `model` JSON is in the titles page). Names come as "Keranen, J.P."; "Tentative" and "The Staff" are skipped.
   A term further out than the next one lists only "Tentative".
+- Each section's status column reads "Open ...", "Waitlist ..." or "Closed / Class Full (210)". A course or instructor gets
+  `st: 'full'` when no section is open and none takes a waitlist, `st: 'wait'` when none is open and one takes a waitlist.
+  "Closed by Dept" and cancelled sections are ignored.
 - The Schedule of Classes sends no `Access-Control-Allow-Origin` header, so a browser on another site cannot make these
   requests. That is why this part is a file and not a live lookup.
 

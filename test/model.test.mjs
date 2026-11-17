@@ -501,4 +501,18 @@ t('setGrades: uclagrades.com rows become A percentages; co-taught rows count onc
   assert.deepEqual(e, { a: 40, n: 100, p: [{ name: 'Bruin, J.B.', a: 75, n: 40 }, { name: 'Other, O.' }] });
   assert.deepEqual(MODEL.setGrades('ZZ 14', [row('25F', '1', 'A', 9, 'X, Y')]), {}); assert.equal(MODEL.gradeFor('ZZ 14', 'WI27'), null);
 });
+t('seats: a full class is listed last, is never recommended or offered as an alternate, and a full instructor is not the one ranked on', () => {
+  const G = MODEL.GRADES; G.term = '27W'; G.asOf = '2026-11-17';
+  Object.assign(G.c, { 'ZZ 10': { a: 20, n: 50 }, 'ZZ 11': { a: 40, n: 100, st: 'wait' }, 'ZZ 12': { a: 90, n: 200, st: 'full', p: [{ name: 'Full, F.', a: 95, n: 50, st: 'full' }, { name: 'Open, O.', a: 60, n: 50 }] } });
+  assert.deepEqual([MODEL.seatsFor('ZZ 12', 'WI27'), MODEL.seatsFor('ZZ 11', 'WI27'), MODEL.seatsFor('ZZ 10', 'WI27'), MODEL.seatsFor('ZZ 12', 'SP27')], ['full', 'waitlist', null, null]);
+  assert.deepEqual([MODEL.gradeFor('ZZ 12', 'WI27').prof, MODEL.gradeFor('ZZ 12', 'WI27').a], ['Open, O.', 60]);
+  assert.match(MODEL.gradeFor('ZZ 12', 'WI27').text, /Full, F\. 95% \(full\), Open, O\. 60%/);
+  const p = synth([['PICK', 1, [zz('ZZ 10'), zz('ZZ 11'), zz('ZZ 12')]], ['REQ', 2, [zz('ZZ 13'), zz('ZZ 14')]]]), key = MODEL.build(p, {}).groups[0].key;
+  const slot = MODEL.nextQuarter(MODEL.build(p, { perQuarter: 3 }), 'WI27').picks.find(x => x.slot);
+  assert.deepEqual(slot.options.map(o => [o.code, o.seats]), [['ZZ 10', null], ['ZZ 11', 'waitlist'], ['ZZ 12', 'full']]); assert.equal(slot.rec, 'ZZ 10');
+  assert.deepEqual(slot.alts.map(a => a.code), ['ZZ 10', 'ZZ 11']);
+  const mine = MODEL.nextQuarter(MODEL.build(p, { perQuarter: 3, choices: { [key]: ['ZZ 12'] } }), 'WI27').picks.find(x => x.code === 'ZZ 12');
+  assert.match(mine.why, /full as of 2026-11-17$/); assert.equal(mine.seats, 'full');
+  delete G.c['ZZ 10']; delete G.c['ZZ 11']; delete G.c['ZZ 12'];
+});
 console.log(n + ' passed');

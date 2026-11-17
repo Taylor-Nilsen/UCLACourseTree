@@ -18,15 +18,20 @@
   }
   function setGrades(code, rows) {
     const e = GRADES.c[code] || {};
-    return GRADES.c[code] = { ...gradeStat(rows), ...(e.p && { p: e.p.map(p => ({ name: p.name, ...gradeStat(rows.filter(r => profKey(r.instructorName) === profKey(p.name))) })) }) };
+    return GRADES.c[code] = { ...e, ...gradeStat(rows), ...(e.p && { p: e.p.map(p => ({ ...p, ...gradeStat(rows.filter(r => profKey(r.instructorName) === profKey(p.name))) })) }) };
   }
+  // Seats in the term GRADES covers, as of GRADES.asOf: 'full' (no open section, no waitlist), 'waitlist' (none open, a waitlist is), else null.
+  const SEAT = { full: 'full', wait: 'waitlist' };
+  const seatsFor = (code, term) => term && GRADES.term === term.slice(2) + term[0] && SEAT[(GRADES.c[code] || {}).st] || null;
   function gradeFor(code, term) {
     const e = GRADES.c[code]; if (!e) return null;
-    const ps = term && GRADES.term === term.slice(2) + term[0] && e.p || [], best = ps.filter(p => p.n).sort((x, y) => y.a - x.a)[0];
+    // the best listed instructor is one you can still get: open before waitlist before full, then most A's
+    const ps = term && GRADES.term === term.slice(2) + term[0] && e.p || [], tier = p => ['wait', 'full'].indexOf(p.st) + 1;
+    const best = ps.filter(p => p.n).sort((x, y) => tier(x) - tier(y) || y.a - x.a)[0];
     if (!best && !e.n) return null;
     const all = e.n ? `all instructors ${e.a}%` : '';
     return { a: best ? best.a : e.a, n: best ? best.n : e.n, prof: best ? best.name : null, profs: ps,
-      text: "A's: " + (ps.length ? ps.map(p => `${p.name} ${p.n ? p.a + '%' : 'no past grades'}`).concat(all || []).join(', ') : all) };
+      text: "A's: " + (ps.length ? ps.map(p => `${p.name} ${p.n ? p.a + '%' : 'no past grades'}${p.st ? ` (${SEAT[p.st]})` : ''}`).concat(all || []).join(', ') : all) };
   }
   const EW = /ETHICS|WRITING|DIVERSITY|AMERICAN HISTORY/; // requirements a course used elsewhere also satisfies
   // GE-style lists (hundreds of options) stay as searchable slots in their own area instead of choice nodes
@@ -516,24 +521,27 @@
     const titleOf = c => (nm.get(c) || {}).title || (COURSES[c] || {}).t || c;
     const groupOf = k => model.groups.find(g => g.key === k);
     // options of one requirement: highest A percentage first, courses with no grade data after, otherwise in the order given
-    const aOf = c => (gradeFor(c, T) || { a: -1 }).a, byA = list => list.slice().sort((x, y) => aOf(y.code || y) - aOf(x.code || x));
-    const gr = x => Object.assign(x, { grade: gradeFor(x.code, T) });
+    // ... and, in the term seat counts are known for, courses with an open section before waitlist-only before full
+    const aOf = c => (gradeFor(c, T) || { a: -1 }).a, shut = c => ['waitlist', 'full'].indexOf(seatsFor(c, T)) + 1;
+    const byA = list => list.slice().sort((x, y) => shut(x.code || x) - shut(y.code || y) || aOf(y.code || y) - aOf(x.code || x));
+    const gr = x => Object.assign(x, { grade: gradeFor(x.code, T), seats: seatsFor(x.code, T) });
     const isSlot = c => /^(GE|CHOOSE): /.test(c);
     const real = (model.plan.find(p => p.term === T).courses).map(c => nm.get(c));
     const ranked = real.filter(n => !isSlot(n.code)).sort((a, b) => !!b.critical - !!a.critical || a.slack - b.slack || b.unlocks - a.unlocks || a.priority - b.priority)
       .concat(real.filter(n => isSlot(n.code)));
     const unl = n => n.unlocks ? `unlocks ${plural(n.unlocks, 'later course')}` : '';
     // pool for "if you can't take it", best first: later courses that can move up, options of open select-N-of-M groups, later GE slots
-    const pool = model.nodes.filter(n => at(n) > ti && !isSlot(n.code) && can(n.code)).sort((a, b) => a.priority - b.priority)
+    const open = c => can(c) && seatsFor(c, T) !== 'full'; // a full class is no fallback
+    const pool = model.nodes.filter(n => at(n) > ti && !isSlot(n.code) && open(n.code)).sort((a, b) => a.priority - b.priority)
       .map(b => ({ code: b.code, title: b.title, why: ['planned for ' + b.planned, unl(b)].filter(Boolean).join('; '), groupKey: null, same: false }))
-      .concat(model.groups.filter(g => g.choice && g.undecided && g.selected !== false).flatMap(g => byA(g.alternatives.filter(a => can(a.code)))
+      .concat(model.groups.filter(g => g.choice && g.undecided && g.selected !== false).flatMap(g => byA(g.alternatives.filter(a => open(a.code)))
         .map(a => ({ code: a.code, title: titleOf(a.code), why: 'option for ' + g.name.toLowerCase(), groupKey: g.key, same: false }))))
       .concat(model.nodes.filter(n => at(n) > ti && n.code.startsWith('GE: '))
         .map(n => ({ code: n.code, title: n.title, why: 'any approved course; moves up the slot planned for ' + n.planned, groupKey: null, same: false }))).map(gr);
     const used = new Map(), recd = new Set();
     const picks = ranked.map(n => {
       const slot = isSlot(n.code), g = groupOf(slot ? !n.pathChoiceKey && n.code.startsWith('CHOOSE: ') && n.groupKey : n.pickedFor);
-      const alts = byA((g && g.choice ? g.alternatives : []).filter(a => can(a.code))).slice(0, 3)
+      const alts = byA((g && g.choice ? g.alternatives : []).filter(a => open(a.code))).slice(0, 3)
         .map(a => gr({ code: a.code, title: titleOf(a.code), why: 'same requirement: ' + g.name.toLowerCase(), groupKey: g.key, same: true }));
       // one pool entry per requirement per column, so a long elective list doesn't fill it
       if (!slot) for (const b of pool.slice().sort((x, y) => (used.get(x.code) || 0) - (used.get(y.code) || 0))) {
@@ -543,15 +551,16 @@
         alts.push(b);
       }
       const rank = a => a.same ? -1 : pool.indexOf(a); // same requirement first, then pool order: best on top
-      alts.sort((a, b) => rank(a) - rank(b) || aOf(b.code) - aOf(a.code));
+      alts.sort((a, b) => rank(a) - rank(b) || shut(a.code) - shut(b.code) || aOf(b.code) - aOf(a.code));
+      const st = seatsFor(n.code, T), shutWhy = st ? (st === 'full' ? 'full' : 'waitlist only') + ` as of ${GRADES.asOf}` : '';
       const why = slot ? (n.code.startsWith('GE: ') ? 'any approved course from the list' : 'decision pending: select a course')
-        : [n.critical ? 'must take now: delaying it pushes back ' + n.criticalWhy : `can slip ${n.slack}${n.slack >= 4 ? '+' : ''} offered quarter${n.slack === 1 ? '' : 's'}`, unl(n)].filter(Boolean).join('; ');
+        : [n.critical ? 'must take now: delaying it pushes back ' + n.criticalWhy : `can slip ${n.slack}${n.slack >= 4 ? '+' : ''} offered quarter${n.slack === 1 ? '' : 's'}`, unl(n), shutWhy].filter(Boolean).join('; ');
       // an open slot: every course on its requirement's list that can be taken this quarter
       const sg = slot && !n.pathChoiceKey && groupOf(n.groupKey);
       const options = sg ? byA((sg.placeholder ? sg.options : sg.alternatives.map(a => a.code)).filter(c => COURSES[c] && can(c))).map(c => gr({ code: c, title: titleOf(c), units: COURSES[c].u })) : [];
       // recommendation for an open slot: the option with the most A's that can be taken this quarter and that no earlier slot of
-      // the quarter was given; none when that option has no grade data
-      const top = options.find(o => !recd.has(o.code)), rec = top && top.grade ? Object.assign(top, { rec: true }) : null;
+      // the quarter was given; none when that option has no grade data or no open section
+      const top = options.find(o => !recd.has(o.code)), rec = top && top.grade && !top.seats ? Object.assign(top, { rec: true }) : null;
       if (rec) recd.add(rec.code);
       return gr({ code: n.code, title: n.title, units: n.units, critical: !!n.critical, slot, why, alts, options, groupKey: sg ? sg.key : null, rec: rec ? rec.code : null });
     });
@@ -563,5 +572,5 @@
     const terms = [...new Set(model.nodes.filter(n => n.groupKey === groupKey && n.planned && /^(GE|CHOOSE): /.test(n.code)).map(n => n.planned))];
     return [...new Set(terms.flatMap(t => nextQuarter(model, t, opts).picks.filter(x => x.groupKey === groupKey && x.rec).map(x => x.rec)))];
   }
-  g.MODEL = { build, previewChange, nextQuarter, recommend, gradeFor, setGrades, GRADES };
+  g.MODEL = { build, previewChange, nextQuarter, recommend, gradeFor, seatsFor, setGrades, GRADES };
 })(typeof module !== 'undefined' ? module.exports : window);
