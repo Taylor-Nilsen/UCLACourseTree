@@ -7,7 +7,7 @@
 <style>
 :root {
   --bg: #f6f7f9; --card: #fff; --fg: #1b1d21; --muted: #6b7280; --line: #e1e4e8; --accent: #2563eb; --accent-fg: #fff;
-  --done: #5f9e78; --done-bg: #e4efe8; --prog: #0d9488; --prog-bg: #d3f1ed; --ip: #2563eb; --ip-bg: #dbeafe; --ready: #d97706; --ready-bg: #fffbeb;
+  --done: #6f9c80; --done-bg: #e9efea; --prog: #0b9a8d; --prog-bg: #a5ebe0; --ip: #2563eb; --ip-bg: #dbeafe; --ready: #d97706; --ready-bg: #fffbeb;
   --locked: #9ca3af; --locked-bg: #f3f4f6; --ph: #7c3aed; --ph-bg: #f3e8ff; --block: #dc2626; --edge: #c3c8d0;
   --warn-bg: #fef3c7; --warn-fg: #92400e; --err-bg: #fee2e2; --err-fg: #991b1b;
   color-scheme: light;
@@ -15,7 +15,7 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #111317; --card: #1a1d23; --fg: #e6e7ea; --muted: #9aa0aa; --line: #2d3139; --accent: #60a5fa; --accent-fg: #0b1220;
-    --done: #6fae87; --done-bg: #1a2e22; --prog: #2dd4bf; --prog-bg: #0f332f; --ip: #60a5fa; --ip-bg: #132a4a; --ready: #fbbf24; --ready-bg: #2a2110;
+    --done: #5d8a6f; --done-bg: #18241d; --prog: #2ee6cf; --prog-bg: #0e5a52; --ip: #60a5fa; --ip-bg: #132a4a; --ready: #fbbf24; --ready-bg: #2a2110;
     --locked: #6b7280; --locked-bg: #22252b; --ph: #c084fc; --ph-bg: #2a1a40; --block: #f87171; --edge: #3d424c;
     --warn-bg: #3a2c0b; --warn-fg: #fcd34d; --err-bg: #3b1515; --err-fg: #fca5a5;
     color-scheme: dark;
@@ -23,7 +23,7 @@
 }
 :root[data-theme="dark"] {
     --bg: #111317; --card: #1a1d23; --fg: #e6e7ea; --muted: #9aa0aa; --line: #2d3139; --accent: #60a5fa; --accent-fg: #0b1220;
-    --done: #6fae87; --done-bg: #1a2e22; --prog: #2dd4bf; --prog-bg: #0f332f; --ip: #60a5fa; --ip-bg: #132a4a; --ready: #fbbf24; --ready-bg: #2a2110;
+    --done: #5d8a6f; --done-bg: #18241d; --prog: #2ee6cf; --prog-bg: #0e5a52; --ip: #60a5fa; --ip-bg: #132a4a; --ready: #fbbf24; --ready-bg: #2a2110;
     --locked: #6b7280; --locked-bg: #22252b; --ph: #c084fc; --ph-bg: #2a1a40; --block: #f87171; --edge: #3d424c;
     --warn-bg: #3a2c0b; --warn-fg: #fcd34d; --err-bg: #3b1515; --err-fg: #fca5a5;
     color-scheme: dark;
@@ -116,7 +116,7 @@ button, input { font: inherit; color: inherit; }
 .node .chipt { font-size: 10px; fill: var(--fg); }
 .s-done .box { fill: var(--done-bg); stroke: var(--done); }
 /* done: muted green; in progress this quarter: blue-green; enrolled for a later quarter: blue */
-.s-ip .box { fill: var(--prog-bg); stroke: var(--prog); }
+.s-ip .box { fill: var(--prog-bg); stroke: var(--prog); stroke-width: 2.5; }
 .s-enrolled .box { fill: var(--ip-bg); stroke: var(--ip); }
 .node .enr { fill: var(--ip); font-size: 10px; font-weight: 700; }
 .s-ready .box { fill: var(--ready-bg); stroke: var(--ready); stroke-width: 2.5; }
