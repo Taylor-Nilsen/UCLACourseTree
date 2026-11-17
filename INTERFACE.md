@@ -106,7 +106,7 @@ Group key: `section + '|' + name + '|' + index` (stable across rebuilds).
   `ready` = every prereq AND-group has a done/in-progress/selected member; `unmet` = count of missing transitive prereqs;
   `why` is a short fact ("prereqs met", "no prereqs", "needs 2 prereqs: CHEM 20B, MATH 32A",
   "not in course database", "writing credit", "also satisfies Engineering Writing",
-  "already planned for <group>, counts for both"). Nothing is labeled recommended.
+  "already planned for <group>, counts for both"). `alternatives` carries no recommendation; see Grades below.
 - Alternative groups (pick k of a section's groups when it has more than k; same-name groups; `orPrev` pairs)
   form one **path choice** (`model.pathChoices`); each group is a **path**, taken as a whole bundle. They are never
   auto-resolved: a group is `selected` only when it is taken, by `opts.choices['path:' + pathChoiceKey]` (first) or
@@ -211,6 +211,10 @@ and a listed instructor has past grades in the course, `a`/`n`/`prof` are the be
 figure. `text` reads "A's: Henary, M. 61%, Pang, J. 62%, all instructors 64%". `nextQuarter` puts `grade` (that object or null) on every
 pick, alt and option, and orders options of one requirement (`options`, `same` alts, an undecided group's entries in the pool) by `a`
 descending, no data last. The order of `picks` and of the pool across requirements does not use grades.
+Recommendations: an open-slot pick carries `rec: code|null`, and that option has `rec: true`. It is the first of `options` (most A's
+that can be taken that quarter) not already recommended to an earlier slot of the quarter, and null when that option has no grade.
+`MODEL.recommend(model, groupKey, opts) -> string[]` collects the `rec` of each of the group's open slots in the quarter it is planned
+for. The model still selects nothing; path choices get no recommendation.
 
 ### Additions for real L&S audits
 - A group with a `SELECT FROM` and no `NEEDS` line gets `needCourses` from its title's count word minus applied courses (min 1). A group whose `NEEDS` has units but no course count carries `unitsOnly: true` and is not used as a course-count check.

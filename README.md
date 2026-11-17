@@ -7,7 +7,7 @@ Upload your UCLA DARS degree-audit PDF and get a prerequisite "skill tree" plus 
 - Reads your audit: completed courses, courses in progress, what each requirement group still needs, and your expected graduation term.
 - Draws the remaining courses as a tree, with arrows from prerequisites to the courses they unlock.
 - Spreads the remaining courses over the quarters you have left, respecting prerequisites and the quarters each course was actually offered.
-- Never chooses between real options for you. Where a requirement offers more courses than it needs, it shows every option with its prerequisites and you select the ones you want.
+- Never chooses between real options for you. Where a requirement offers more courses than it needs, it shows every option with its prerequisites, recommends the one with the most A's, and you select the ones you want.
 
 ## Run it
 
@@ -74,6 +74,8 @@ Under each class are up to 3 alternates for if you can't get it, best on top. Ea
 2. Courses planned for a later quarter that could move up, in the planner's own priority order.
 3. Options for requirements you haven't selected yet.
 4. A GE slot planned for later.
+
+Recommendations: an open GE slot or an unselected requirement gets a "Recommended" row above its list. It is the course with the most A's among the ones you could take that quarter (offered then, prerequisites done by then), using the listed instructor's figure for the next term when there is one. Two open slots in the same quarter get different courses. Click it to select it and plan it for that quarter. A requirement's options panel marks the same course "recommended". Nothing is selected for you, and there is no recommendation when the top option has no grade data. Either/or path choices (A + B or C) get no recommendation.
 
 Grades: every class, alternate and option shows the share of past letter grades that were A+, A or A- ("A's"). For the next term, where the Schedule of Classes names the instructors, it shows each listed instructor's own figure in that course, then the figure for all instructors. Later quarters only have the all-instructor figure. Options for the same requirement are listed most A's first, using the best listed instructor's figure when there is one and the all-instructor figure otherwise; courses with no grade data go last. The order of the classes at the top does not use grades: it is about graduating on time.
 

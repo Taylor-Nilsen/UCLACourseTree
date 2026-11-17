@@ -245,7 +245,7 @@
   };
   const aText = (code, term) => (want(code), (MODEL.gradeFor(code, term) || {}).text || '');
   const termOptions = (x, term) => !x || !x.options.length ? '' : `<details class="alts" open><summary>${x.options.length} course${x.options.length === 1 ? '' : 's'} you could take in ${esc(term)}, most A's first</summary><div class="optlist tall">` +
-    x.options.slice(0, 200).map(o => optRow(x.groupKey, o.code, `${o.title} · ${o.units} u${o.grade ? ' · ' + o.grade.text : ''}`, 'select', '', undefined, term)).join('') +
+    x.options.slice(0, 200).map(o => optRow(x.groupKey, o.code, `${o.rec ? 'recommended · ' : ''}${o.title} · ${o.units} u${o.grade ? ' · ' + o.grade.text : ''}`, 'select', o.rec ? 'rec' : '', undefined, term)).join('') +
     (x.options.length > 200 ? `<p class="muted small">Showing 200 of ${x.options.length}. Open the slot to filter the full list.</p>` : '') + '</div></details>';
   const enrolledChips = (t, nm) => (t.enrolled || []).map(c => `<button class="pchip s-ip" data-node="${esc(c)}" title="Already enrolled for ${esc(t.term)}"><b>${esc(c)}</b><span>${esc(titleOf(c, nm))}</span><small>${esc((nm[c] || {}).units ?? '')} u · enrolled</small></button>`).join('');
   function optionList(g) {
@@ -508,6 +508,7 @@
         ? `<button class="pchip choose" ${n.pathChoiceKey ? `data-path="${esc(n.pathChoiceKey)}"` : `data-group="${esc(n.groupKey)}"`}><b>choose: ${esc(n.title)}</b><small>${esc(x.units)} u</small></button>`
         : courseChip(x.code, r.term, nm, '');
       return `<div class="ncol"><div class="nrank">#${i + 1}${i || x.slot ? '' : ' most important'}</div><div class="ntop" data-drop="next" data-out="${esc(x.code)}" data-term="${esc(r.term)}">${top}</div><span class="nwhy">${esc(x.why)}${x.grade ? `<br>${esc(x.grade.text)}` : ''}</span>
+        ${x.rec ? `<div class="nalt-h">Recommended, most A's of what you can take in ${esc(r.term)}:</div>${(o => optRow(x.groupKey, o.code, `${o.grade.a}% A's${o.grade.prof ? ' with ' + o.grade.prof : ''} · ${o.title}`, 'select', 'rec', undefined, r.term))(x.options.find(o => o.rec))}` : ''}
         ${termOptions(x, r.term)}${x.alts.length ? `<div class="nalt-h">If you can't take it:</div>${x.alts.map(alt).join('')}` : x.slot ? '' : '<div class="nalt-h">Nothing else can be taken this quarter in its place.</div>'}</div>`;
     }).join('') || '<p class="muted pad">Nothing left to plan.</p>';
   }
@@ -598,10 +599,12 @@
   }
 
   function groupDetail(g, nm) {
+    g.alternatives.forEach(a => want(a.code));
+    const recs = MODEL.recommend(S.model, g.key, { defers: S.opts.defers });
     const rows = choiceOpts(g).map(o => {
       const c = course(o.code) || {}, pre = preHtml(c.pre, nm);
       return `<div class="optd${o.pinned ? ' on' : ''}"><div class="optd-h">${o.pinned ? PIN : `<i class="dot${o.ready ? ' ok' : ''}" title="${o.ready ? 'prereqs met' : 'prereqs missing'}"></i>`}
-        <b>${nm[o.code] ? `<a href="#" data-node="${esc(o.code)}">${esc(o.code)}</a>` : esc(o.code)}</b><span class="muted small">${esc(c.u ?? '?')} u</span>
+        <b>${nm[o.code] ? `<a href="#" data-node="${esc(o.code)}">${esc(o.code)}</a>` : esc(o.code)}</b><span class="muted small">${esc(c.u ?? '?')} u</span>${recs.includes(o.code) ? '<span class="rectag">recommended</span>' : ''}
         <button class="btn sm" data-act="${o.pinned ? 'unselect' : 'select'}" data-key="${esc(g.key)}" data-code="${esc(o.code)}">${o.pinned ? 'Unselect' : 'Select'}</button></div>
         <div class="small">${esc(c.t || 'Not in the course database')}</div>
         <div class="small muted">Offered: ${esc(offeredText(o.code))}</div>
@@ -617,6 +620,7 @@
       <h2>${esc(pickLabel(g))}</h2><p>${esc(g.name)}<br><small class="muted">${esc(g.section)}</small></p>${slots}
       ${takenPathOf(g.key) ? partOf(takenPathOf(g.key)) : ''}
       ${g.selected === false && pcOfGroup(g.key) ? `<p class="small">One path of ${esc(pcOfGroup(g.key).title)}. Selecting an option here selects this path. <a href="#" data-path="${esc(pcOfGroup(g.key).key)}">Compare paths</a></p>` : ''}
+      ${recs.length ? `<p class="small"><b>Recommended: ${esc(recs.join(', '))}</b>. Most A's among the options you can take in the quarter the open slot is planned for.</p>` : ''}
       <p class="small muted">Green dot: prerequisites done, in progress or selected. Grey: something is still missing.</p>${rows}`;
   }
 

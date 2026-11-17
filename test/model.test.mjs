@@ -485,6 +485,13 @@ t("grades: A percentage orders one requirement's options; a listed instructor's 
   const slot = MODEL.nextQuarter(MODEL.build(p, { perQuarter: 3 })).picks.find(x => x.slot);
   assert.deepEqual(slot.options.map(o => o.code), ['ZZ 12', 'ZZ 11', 'ZZ 10']); // no grade data goes last
   assert.deepEqual(slot.alts.map(a => a.code), ['ZZ 12', 'ZZ 11', 'ZZ 10']);
+  // the open slot recommends the option with the most A's; no recommendation without grade data or once the selection is made
+  assert.equal(slot.rec, 'ZZ 12'); assert.deepEqual(slot.options.map(o => !!o.rec), [true, false, false]);
+  assert.deepEqual(MODEL.recommend(MODEL.build(p, { perQuarter: 3 }), key), ['ZZ 12']); assert.deepEqual(MODEL.recommend(mm, key), []);
+  const two = synth([['TWO', 2, [zz('ZZ 10'), zz('ZZ 11'), zz('ZZ 12')]]]), k2 = MODEL.build(two, {}).groups[0].key;
+  assert.deepEqual(MODEL.recommend(MODEL.build(two, { perQuarter: 3 }), k2), ['ZZ 12', 'ZZ 11']);
+  const none = synth([['NONE', 1, [zz('ZZ 13'), zz('ZZ 15')]]]), kn = MODEL.build(none, {}).groups[0].key;
+  assert.deepEqual(MODEL.recommend(MODEL.build(none, {}), kn), []);
 });
 t('setGrades: uclagrades.com rows become A percentages; co-taught rows count once; listed instructors match by last name + initial', () => {
   const row = (term, sect, grd, k, who) => ({ enrollmentTerm: term, sectionNumber: sect, gradeOffered: grd, gradeCount: String(k), instructorName: who });

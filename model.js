@@ -530,7 +530,7 @@
         .map(a => ({ code: a.code, title: titleOf(a.code), why: 'option for ' + g.name.toLowerCase(), groupKey: g.key, same: false }))))
       .concat(model.nodes.filter(n => at(n) > ti && n.code.startsWith('GE: '))
         .map(n => ({ code: n.code, title: n.title, why: 'any approved course; moves up the slot planned for ' + n.planned, groupKey: null, same: false }))).map(gr);
-    const used = new Map();
+    const used = new Map(), recd = new Set();
     const picks = ranked.map(n => {
       const slot = isSlot(n.code), g = groupOf(slot ? !n.pathChoiceKey && n.code.startsWith('CHOOSE: ') && n.groupKey : n.pickedFor);
       const alts = byA((g && g.choice ? g.alternatives : []).filter(a => can(a.code))).slice(0, 3)
@@ -549,9 +549,19 @@
       // an open slot: every course on its requirement's list that can be taken this quarter
       const sg = slot && !n.pathChoiceKey && groupOf(n.groupKey);
       const options = sg ? byA((sg.placeholder ? sg.options : sg.alternatives.map(a => a.code)).filter(c => COURSES[c] && can(c))).map(c => gr({ code: c, title: titleOf(c), units: COURSES[c].u })) : [];
-      return gr({ code: n.code, title: n.title, units: n.units, critical: !!n.critical, slot, why, alts, options, groupKey: sg ? sg.key : null });
+      // recommendation for an open slot: the option with the most A's that can be taken this quarter and that no earlier slot of
+      // the quarter was given; none when that option has no grade data
+      const top = options.find(o => !recd.has(o.code)), rec = top && top.grade ? Object.assign(top, { rec: true }) : null;
+      if (rec) recd.add(rec.code);
+      return gr({ code: n.code, title: n.title, units: n.units, critical: !!n.critical, slot, why, alts, options, groupKey: sg ? sg.key : null, rec: rec ? rec.code : null });
     });
     return { term: T, terms, picks };
   }
-  g.MODEL = { build, previewChange, nextQuarter, gradeFor, setGrades, GRADES };
+  // Recommended options for a requirement's open slots: each slot's recommendation in the quarter it is planned for.
+  // ponytail: slots in different quarters can recommend the same course (it is listed once); rank across quarters if that matters.
+  function recommend(model, groupKey, opts) {
+    const terms = [...new Set(model.nodes.filter(n => n.groupKey === groupKey && n.planned && /^(GE|CHOOSE): /.test(n.code)).map(n => n.planned))];
+    return [...new Set(terms.flatMap(t => nextQuarter(model, t, opts).picks.filter(x => x.groupKey === groupKey && x.rec).map(x => x.rec)))];
+  }
+  g.MODEL = { build, previewChange, nextQuarter, recommend, gradeFor, setGrades, GRADES };
 })(typeof module !== 'undefined' ? module.exports : window);
