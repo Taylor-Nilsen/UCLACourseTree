@@ -1,8 +1,52 @@
 // Degree-plan model: parsed DARS -> requirement choices, prerequisite graph and a quarter-by-quarter plan.
-// Contract: INTERFACE.md. Depends on COURSES (data/ucla-courses.js) and DARS (parser.js).
+// Contract: INTERFACE.md. Depends on COURSES (data/ucla-courses.js), GRADES (data/ucla-instructors.js) and DARS (parser.js).
 (function (g) {
-  const env = typeof module !== 'undefined' ? Object.assign({}, require('./data/ucla-courses.js'), require('./parser.js')) : g;
-  const { COURSES, DARS } = env;
+  const env = typeof module !== 'undefined' ? Object.assign({}, require('./data/ucla-courses.js'), require('./data/ucla-instructors.js'), require('./parser.js')) : g;
+  const { COURSES, DARS } = env, GRADES = env.GRADES || { c: {} };
+  // Share of past letter grades that were A+/A/A- for `code`. For the term GRADES lists instructors for ('WI27' = '27W'), `a` is
+  // the best listed instructor's own figure in that course; otherwise, or when none of them has taught it, the all-instructor figure.
+  // GRADES starts with only the next term's instructor names; setGrades adds the figures for one course from uclagrades.com's rows
+  // (https://www.uclagrades.com/data/courses/<subject>/<number>.json), which the UI fetches when the course is first shown.
+  const LETTER = new Set(['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D+', 'D', 'D-', 'F']); // P/NP, S/U, I, DR... are left out
+  const profKey = name => { const [last, rest = ''] = String(name).toUpperCase().split(','); return last.trim() + ',' + rest.trim()[0]; }; // "KERANEN,J"
+  function gradeStat(rows) {
+    const cells = {}; // a co-taught section repeats its rows once per instructor: count each term + section + grade once
+    for (const r of rows) if (LETTER.has(r.gradeOffered)) cells[`${r.enrollmentTerm}|${r.sectionNumber}|${r.gradeOffered}`] = r;
+    let a = 0, n = 0;
+    for (const r of Object.values(cells)) { n += +r.gradeCount; if (r.gradeOffered[0] === 'A') a += +r.gradeCount; }
+    return n >= 10 ? { a: Math.round(100 * a / n), n } : {}; // under 10 letter grades is noise (a 6-person seminar)
+  }
+  function setGrades(code, rows) {
+    const e = GRADES.c[code] || {};
+    return GRADES.c[code] = { ...e, ...gradeStat(rows), ...(e.p && { p: e.p.map(p => ({ ...p, ...gradeStat(rows.filter(r => profKey(r.instructorName) === profKey(p.name))) })) }) };
+  }
+  // Is `code` (whose history says it runs in the quarters `off`: 'FWS' letters, '?' = any) offered in term index ti? For a term
+  // the Schedule of Classes has published (GRADES.listed) the answer is the schedule itself: listed or not. For any other term,
+  // and for a subject the published term has nothing from yet, it is the quarters the course has run in.
+  const qOf = t => 'FWSU'[((t % 4) + 4) % 4], subjOf = c => c.slice(0, c.lastIndexOf(' ')), sets = new Map();
+  const listedSet = ti => {
+    const a = qOf(ti) !== 'U' && (GRADES.listed || {})[DARS.termName(ti).slice(2) + qOf(ti)];
+    if (a && !sets.has(a)) sets.set(a, { codes: new Set(a), subjects: new Set(a.map(subjOf)) });
+    return a ? sets.get(a) : null;
+  };
+  function offeredAt(code, off, ti) {
+    if (off === '?') return true;
+    const L = COURSES[code] && listedSet(ti);
+    return L && L.subjects.has(subjOf(code)) ? L.codes.has(code) : (off || '').includes(qOf(ti));
+  }
+  // Seats in the term GRADES covers, as of GRADES.asOf: 'full' (no open section, no waitlist), 'waitlist' (none open, a waitlist is), else null.
+  const SEAT = { full: 'full', wait: 'waitlist' };
+  const seatsFor = (code, term) => term && GRADES.term === term.slice(2) + term[0] && SEAT[(GRADES.c[code] || {}).st] || null;
+  function gradeFor(code, term) {
+    const e = GRADES.c[code]; if (!e) return null;
+    // the best listed instructor is one you can still get: open before waitlist before full, then most A's
+    const ps = term && GRADES.term === term.slice(2) + term[0] && e.p || [], tier = p => ['wait', 'full'].indexOf(p.st) + 1;
+    const best = ps.filter(p => p.n).sort((x, y) => tier(x) - tier(y) || y.a - x.a)[0];
+    if (!best && !e.n) return null;
+    const all = e.n ? `all instructors ${e.a}%` : '';
+    return { a: best ? best.a : e.a, n: best ? best.n : e.n, prof: best ? best.name : null, profs: ps,
+      text: "A's: " + (ps.length ? ps.map(p => `${p.name} ${p.n ? p.a + '%' : 'no past grades'}${p.st ? ` (${SEAT[p.st]})` : ''}`).concat(all || []).join(', ') : all) };
+  }
   const EW = /ETHICS|WRITING|DIVERSITY|AMERICAN HISTORY/; // requirements a course used elsewhere also satisfies
   // GE-style lists (hundreds of options) stay as searchable slots in their own area instead of choice nodes
   const BIGLIST = /FOUNDATIONS OF|GENERAL EDUCATION|\bGE\b|DIVERSITY|WRITING II|ENGINEERING WRITING|QUANTITATIVE REASONING|FOREIGN LANGUAGE|LANGUAGE REQUIREMENT/;
@@ -40,6 +84,9 @@
     }
     const taken = {};
     for (const [c, t] of Object.entries(parsed.taken)) if (['done', 'ip'].includes(st(t))) taken[c] = t;
+    // enrolled ahead: registered for a quarter after the audit's current one (WI27 on a FA26 audit). Not in progress yet, and not a
+    // finished prerequisite for anything until that quarter is over.
+    const later = c => taken[c] && st(taken[c]) === 'ip' && DARS.termIndex(taken[c].term) > DARS.termIndex(parsed.currentTerm);
     const chosenBy = new Map(); // code -> groupKey that plans it
 
     // count checks: compare against the itemized groups of the section right before
@@ -88,7 +135,7 @@
     const writingOpen = () => writingGroups.some(w => !w.chosen.length && !(choices[w.key] || []).length);
     // "ready" = every prereq is done, in progress or pinned (not merely planned)
     const pinned = new Set(pickedBy.keys());
-    const met = c => !!taken[c] || pinned.has(c);
+    const met = c => !!taken[c] && !later(c) || pinned.has(c);
 
     // unmet transitive prereqs; OR-groups take the cheapest alternative
     function unmet(code) {
@@ -230,7 +277,7 @@
       nodes.set(code, Object.assign({ code, title: c ? c.t : t ? t.title : code, units: c ? c.u : t ? t.units : 4, offered: c ? c.off : '?', prereqs: c ? c.pre : [] }, c && c.req && !c.pre.length ? { req: c.req } : {}, extra));
     };
     const viaSrc = new Set(Object.entries(taken).filter(([c, t]) => t.via && COURSES[c]).map(([, t]) => t.via)); // a source stays a node unless a real course stands in for it
-    for (const [code, t] of Object.entries(taken)) if (!t.subst && !viaSrc.has(code) && !(t.via && !COURSES[code])) add(code, { status: st(t), term: t.term });
+    for (const [code, t] of Object.entries(taken)) if (!t.subst && !viaSrc.has(code) && !(t.via && !COURSES[code])) add(code, { status: st(t), term: t.term, ...(later(code) && { enrolled: true }) });
     for (const gr of groups) if (gr.selected) for (const c of gr.chosen) {
       if (c.code.startsWith('GE: ')) add(c.code, { title: gr.name, units: gr._slotUnits, offered: 'FWS', status: 'placeholder', groupKey: gr.key });
       else add(c.code, { groupKey: pickedBy.get(c.code) || chosenBy.get(c.code) || gr.key });
@@ -262,7 +309,7 @@
     }
     pull(pathChoices.filter(open).map(pc => 'PATH: ' + pc.key));
     for (const n of nodes.values()) if (!before.has(n.code) && n.status !== 'path') n.pathPrereq = true;
-    for (const n of nodes.values()) if (!n.status) n.status = n.prereqs.every(grp => grp.some(x => taken[x])) ? 'ready' : 'locked';
+    for (const n of nodes.values()) if (!n.status) n.status = n.prereqs.every(grp => grp.some(x => taken[x] && !later(x))) ? 'ready' : 'locked';
     const edges = [];
     for (const n of nodes.values()) for (const grp of n.prereqs) for (const p of grp) if (nodes.has(p)) edges.push({ from: p, to: n.code });
     // each path's courses in prerequisite order: pre = prereqs present as nodes, after = courses of the same path
@@ -296,7 +343,6 @@
     // classes already enrolled for a later quarter (WI27 on a FA26 audit) take seats there and only count as prereqs after it
     const ahead = Object.entries(taken).filter(([, x]) => st(x) === 'ip' && !x.subst && DARS.termIndex(x.term) > t0).map(([c, x]) => [c, DARS.termIndex(x.term)]);
     const have0 = Object.keys(taken).filter(c => !ahead.some(a => a[0] === c));
-    const qOf = t => 'FWSU'[((t % 4) + 4) % 4];
     const usable = t => opts.useSummer || qOf(t) !== 'U';
     // notBefore: code -> earliest term index (defers, what-if slips); ban: code -> term indexes it may not use (conflicts);
     // pins: code -> term index the user moved it to. A pinned course waits for that term and takes a seat first there (even past
@@ -309,7 +355,7 @@
         quarters++;
         const seats = per - ahead.filter(a => a[1] === t).length;
         for (const [c, at] of ahead) if (at < t) have.add(c);
-        const q = qOf(t), ok = n => (n.offered === '?' || n.offered.includes(q)) && !(ban.get(n.code) || NONE).has(t) && n.prereqs.every(grp => grp.some(x => have.has(x)));
+        const ok = n => offeredAt(n.code, n.offered, t) && !(ban.get(n.code) || NONE).has(t) && n.prereqs.every(grp => grp.some(x => have.has(x)));
         const picks = left.concat(sl).filter(n => pins.get(n.code) === t && ok(n)), free = n => !picks.includes(n) && !(pins.get(n.code) > t);
         for (const n of left) {
           if (picks.length >= seats) break;
@@ -327,7 +373,7 @@
     const tn = t => t == null ? 'nowhere' : DARS.termName(t);
     // quarters between two terms, not counting summers when summer is off
     const ord = t => opts.useSummer ? t : t - Math.floor((t + 1) / 4);
-    const nextOff = (n, t) => { for (let u = t + 1; u <= t + 8; u++) if (usable(u) && (n.offered === '?' || n.offered.includes(qOf(u)))) return u; return null; };
+    const nextOff = (n, t) => { for (let u = t + 1; u <= t + 8; u++) if (usable(u) && offeredAt(n.code, n.offered, u)) return u; return null; };
 
     // defers: not before that term (still only in offered quarters)
     const realSet = new Set(real.map(n => n.code)), notBefore = new Map();
@@ -343,7 +389,7 @@
       const ti = DARS.termIndex(term), n = nodes.get(c);
       if (!todoSet.has(c)) warnings.push(`Ignored your move of ${c}: it is not in the plan.`);
       else if (ti == null || ti <= t0 || !usable(ti)) warnings.push(`Ignored your move of ${c} to ${term}: not a quarter the plan uses.`);
-      else if (!(n.offered === '?' || n.offered.includes(qOf(ti)))) warnings.push(`Ignored your move of ${c} to ${term}: it is not offered in ${{ F: 'Fall', W: 'Winter', S: 'Spring', U: 'Summer' }[qOf(ti)]}.`);
+      else if (!offeredAt(n.code, n.offered, ti)) warnings.push(`Ignored your move of ${c} to ${term}: it is not offered in ${{ F: 'Fall', W: 'Winter', S: 'Spring', U: 'Summer' }[qOf(ti)]}${n.offered.includes(qOf(ti)) ? ` ${term.slice(2)} (not in the Schedule of Classes for that term)` : ''}.`);
       else { PINS.set(c, ti); notBefore.delete(c); }
     }
     // conflicts: a and b can't share `term`. Plan it both ways and keep the course whose move hurts less:
@@ -444,7 +490,7 @@
       delete o.pins[x.code];
       for (let u = t + 1; u <= t + 8; u++) {
         const q = 'FWSU'[u % 4];
-        if ((opts.useSummer || q !== 'U') && (x.offered === '?' || x.offered.includes(q))) { o.defers[x.code] = DARS.termName(u); break; }
+        if ((opts.useSummer || q !== 'U') && offeredAt(x.code, x.offered, u)) { o.defers[x.code] = DARS.termName(u); break; }
       }
     };
     if (change.type === 'defer' && n && n.planned) deferPast(n, n.planned);
@@ -481,32 +527,40 @@
     if (!T) return { term: null, terms, picks: [] };
     const ti = DARS.termIndex(T), q = 'FWSU'[((ti % 4) + 4) % 4], defers = opts.defers || {};
     const nm = new Map(model.nodes.map(n => [n.code, n])), at = n => n.planned ? DARS.termIndex(n.planned) : null;
-    const have = new Set(model.nodes.filter(n => n.status === 'done' || n.status === 'ip' || at(n) < ti && at(n) != null).map(n => n.code));
+    // what is finished before this quarter starts: done, in progress in an earlier quarter, or planned earlier. A class you are
+    // enrolled in for this very quarter (or a later one) is not a met prerequisite yet.
+    const have = new Set(model.nodes.filter(n => n.status === 'done' || n.status === 'ip' && !(DARS.termIndex(n.term) >= ti) || at(n) < ti && at(n) != null).map(n => n.code));
     const moved = new Set((model.conflictResolutions || []).filter(r => r.term === T && r.moved).map(r => r.moved));
     const can = c => {
       const k = COURSES[c], n = nm.get(c), off = k ? k.off : n ? n.offered : '';
-      return !have.has(c) && !(n && n.planned === T) && (off === '?' || off.includes(q)) && !moved.has(c) &&
+      return !have.has(c) && !(n && n.planned === T) && offeredAt(c, off, ti) && !moved.has(c) &&
         !(defers[c] && DARS.termIndex(defers[c]) > ti) && (k ? k.pre : n ? n.prereqs : []).every(grp => grp.some(x => have.has(x)));
     };
     const titleOf = c => (nm.get(c) || {}).title || (COURSES[c] || {}).t || c;
     const groupOf = k => model.groups.find(g => g.key === k);
+    // options of one requirement: highest A percentage first, courses with no grade data after, otherwise in the order given
+    // ... and, in the term seat counts are known for, courses with an open section before waitlist-only before full
+    const aOf = c => (gradeFor(c, T) || { a: -1 }).a, shut = c => ['waitlist', 'full'].indexOf(seatsFor(c, T)) + 1;
+    const byA = list => list.slice().sort((x, y) => shut(x.code || x) - shut(y.code || y) || aOf(y.code || y) - aOf(x.code || x));
+    const gr = x => Object.assign(x, { grade: gradeFor(x.code, T), seats: seatsFor(x.code, T) });
     const isSlot = c => /^(GE|CHOOSE): /.test(c);
     const real = (model.plan.find(p => p.term === T).courses).map(c => nm.get(c));
     const ranked = real.filter(n => !isSlot(n.code)).sort((a, b) => !!b.critical - !!a.critical || a.slack - b.slack || b.unlocks - a.unlocks || a.priority - b.priority)
       .concat(real.filter(n => isSlot(n.code)));
     const unl = n => n.unlocks ? `unlocks ${plural(n.unlocks, 'later course')}` : '';
     // pool for "if you can't take it", best first: later courses that can move up, options of open select-N-of-M groups, later GE slots
-    const pool = model.nodes.filter(n => at(n) > ti && !isSlot(n.code) && can(n.code)).sort((a, b) => a.priority - b.priority)
+    const open = c => can(c) && seatsFor(c, T) !== 'full'; // a full class is no fallback
+    const pool = model.nodes.filter(n => at(n) > ti && !isSlot(n.code) && open(n.code)).sort((a, b) => a.priority - b.priority)
       .map(b => ({ code: b.code, title: b.title, why: ['planned for ' + b.planned, unl(b)].filter(Boolean).join('; '), groupKey: null, same: false }))
-      .concat(model.groups.filter(g => g.choice && g.undecided && g.selected !== false).flatMap(g => g.alternatives.filter(a => can(a.code))
+      .concat(model.groups.filter(g => g.choice && g.undecided && g.selected !== false).flatMap(g => byA(g.alternatives.filter(a => open(a.code)))
         .map(a => ({ code: a.code, title: titleOf(a.code), why: 'option for ' + g.name.toLowerCase(), groupKey: g.key, same: false }))))
       .concat(model.nodes.filter(n => at(n) > ti && n.code.startsWith('GE: '))
-        .map(n => ({ code: n.code, title: n.title, why: 'any approved course; moves up the slot planned for ' + n.planned, groupKey: null, same: false })));
-    const used = new Map();
+        .map(n => ({ code: n.code, title: n.title, why: 'any approved course; moves up the slot planned for ' + n.planned, groupKey: null, same: false }))).map(gr);
+    const used = new Map(), recd = new Set();
     const picks = ranked.map(n => {
       const slot = isSlot(n.code), g = groupOf(slot ? !n.pathChoiceKey && n.code.startsWith('CHOOSE: ') && n.groupKey : n.pickedFor);
-      const alts = (g && g.choice ? g.alternatives : []).filter(a => can(a.code)).slice(0, 3)
-        .map(a => ({ code: a.code, title: titleOf(a.code), why: 'same requirement: ' + g.name.toLowerCase(), groupKey: g.key, same: true }));
+      const alts = byA((g && g.choice ? g.alternatives : []).filter(a => open(a.code))).slice(0, 3)
+        .map(a => gr({ code: a.code, title: titleOf(a.code), why: 'same requirement: ' + g.name.toLowerCase(), groupKey: g.key, same: true }));
       // one pool entry per requirement per column, so a long elective list doesn't fill it
       if (!slot) for (const b of pool.slice().sort((x, y) => (used.get(x.code) || 0) - (used.get(y.code) || 0))) {
         if (alts.length >= 3) break;
@@ -515,15 +569,26 @@
         alts.push(b);
       }
       const rank = a => a.same ? -1 : pool.indexOf(a); // same requirement first, then pool order: best on top
-      alts.sort((a, b) => rank(a) - rank(b));
+      alts.sort((a, b) => rank(a) - rank(b) || shut(a.code) - shut(b.code) || aOf(b.code) - aOf(a.code));
+      const st = seatsFor(n.code, T), shutWhy = st ? (st === 'full' ? 'full' : 'waitlist only') + ` as of ${GRADES.asOf}` : '';
       const why = slot ? (n.code.startsWith('GE: ') ? 'any approved course from the list' : 'decision pending: select a course')
-        : [n.critical ? 'must take now: delaying it pushes back ' + n.criticalWhy : `can slip ${n.slack}${n.slack >= 4 ? '+' : ''} offered quarter${n.slack === 1 ? '' : 's'}`, unl(n)].filter(Boolean).join('; ');
+        : [n.critical ? 'must take now: delaying it pushes back ' + n.criticalWhy : `can slip ${n.slack}${n.slack >= 4 ? '+' : ''} offered quarter${n.slack === 1 ? '' : 's'}`, unl(n), shutWhy].filter(Boolean).join('; ');
       // an open slot: every course on its requirement's list that can be taken this quarter
       const sg = slot && !n.pathChoiceKey && groupOf(n.groupKey);
-      const options = sg ? (sg.placeholder ? sg.options : sg.alternatives.map(a => a.code)).filter(c => COURSES[c] && can(c)).map(c => ({ code: c, title: titleOf(c), units: COURSES[c].u })) : [];
-      return { code: n.code, title: n.title, units: n.units, critical: !!n.critical, slot, why, alts, options, groupKey: sg ? sg.key : null };
+      const options = sg ? byA((sg.placeholder ? sg.options : sg.alternatives.map(a => a.code)).filter(c => COURSES[c] && can(c))).map(c => gr({ code: c, title: titleOf(c), units: COURSES[c].u })) : [];
+      // recommendation for an open slot: the option with the most A's that can be taken this quarter and that no earlier slot of
+      // the quarter was given; none when that option has no grade data or no open section
+      const top = options.find(o => !recd.has(o.code)), rec = top && top.grade && !top.seats ? Object.assign(top, { rec: true }) : null;
+      if (rec) recd.add(rec.code);
+      return gr({ code: n.code, title: n.title, units: n.units, critical: !!n.critical, slot, why, alts, options, groupKey: sg ? sg.key : null, rec: rec ? rec.code : null });
     });
     return { term: T, terms, picks };
   }
-  g.MODEL = { build, previewChange, nextQuarter };
+  // Recommended options for a requirement's open slots: each slot's recommendation in the quarter it is planned for.
+  // ponytail: slots in different quarters can recommend the same course (it is listed once); rank across quarters if that matters.
+  function recommend(model, groupKey, opts) {
+    const terms = [...new Set(model.nodes.filter(n => n.groupKey === groupKey && n.planned && /^(GE|CHOOSE): /.test(n.code)).map(n => n.planned))];
+    return [...new Set(terms.flatMap(t => nextQuarter(model, t, opts).picks.filter(x => x.groupKey === groupKey && x.rec).map(x => x.rec)))];
+  }
+  g.MODEL = { build, previewChange, nextQuarter, recommend, gradeFor, seatsFor, offeredAt, setGrades, GRADES };
 })(typeof module !== 'undefined' ? module.exports : window);

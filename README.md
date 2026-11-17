@@ -6,8 +6,8 @@ Upload your UCLA DARS degree-audit PDF and get a prerequisite "skill tree" plus 
 
 - Reads your audit: completed courses, courses in progress, what each requirement group still needs, and your expected graduation term.
 - Draws the remaining courses as a tree, with arrows from prerequisites to the courses they unlock.
-- Spreads the remaining courses over the quarters you have left, respecting prerequisites and the quarters each course was actually offered.
-- Never chooses between real options for you. Where a requirement offers more courses than it needs, it shows every option with its prerequisites and you select the ones you want.
+- Spreads the remaining courses over the quarters you have left, respecting prerequisites and the quarters each course was actually offered. For terms the Schedule of Classes has already published (Winter and Spring 2027 today), it uses the real schedule: a course is only planned, recommended or offered as an alternate there if that term lists it.
+- Never chooses between real options for you. Where a requirement offers more courses than it needs, it shows every option with its prerequisites, recommends the one with the most A's, and you select the ones you want.
 
 ## Run it
 
@@ -29,8 +29,9 @@ Tests: `npm test` (needs Node, no dependencies).
 ## What the colors mean
 
 - Done: you finished the course with a passing grade.
-- In progress: you are enrolled this quarter.
-- Ready: every prerequisite is done or in progress, so you can take it next.
+- In progress: you are taking it this quarter.
+- Enrolled: you are registered for it in a later quarter (blue; in progress is blue-green, done is a muted green). It does not count as a finished prerequisite until that quarter is over, so a class that needs it stays Locked.
+- Ready: every prerequisite is done or in progress this quarter, so you can take it next.
 - Locked: at least one prerequisite is still missing.
 - Placeholder: a general education or elective slot with no specific course selected yet.
 
@@ -45,6 +46,7 @@ Tests: `npm test` (needs Node, no dependencies).
 - To fill a GE slot, click it (in the tree, the Quarter plan or What to take next). The panel lists the courses on that requirement's list you could take in the slot's quarter (offered then, prerequisites done by then) and, below, the full list with a filter by code or title. Selecting a course from a quarter's list plans it for that quarter; from then on it is a normal course with prerequisites, defer, conflict and drag. Until you select, What to take next shows the same per-quarter list under each open slot.
 - Diversity, American History and Institutions, ethics and writing requirements are satisfied automatically by a course you selected for another requirement when it is on their list.
 - Classes you are already enrolled in for a later quarter show in that quarter as "enrolled" and take seats there.
+- To undo a selection (a GE course, a technical breadth or elective pick, an "A or B" slot), use the × on that class: on its box in the tree (top-right corner), next to » and ≠ on its chip in the Quarter plan and What to take next, or the Unselect button in its detail panel. The requirement goes back to an open slot.
 - Selections are saved in your browser.
 
 ## Adjusting the quarter plan
@@ -68,12 +70,18 @@ The "What to take next" tab is for course selection. Pick a quarter (it defaults
 2. Then the ones with the least room to slip (fewest offered quarters they can move before graduation is pushed back).
 3. Then the ones that unlock the most later courses.
 
-Under each class are up to 3 alternates for if you can't get it, best on top. Each one can actually be taken that quarter: it is offered then, and its prerequisites are done, in progress or planned earlier. The order is:
+Under each class are up to 3 alternates for if you can't get it, best on top. Each one can actually be taken that quarter: it is offered then, and its prerequisites are done, in progress this quarter or planned earlier. A class you are already enrolled in for that same quarter does not count as a finished prerequisite. The order is:
 
 1. Other options for the same requirement, when you selected that class from a list.
 2. Courses planned for a later quarter that could move up, in the planner's own priority order.
 3. Options for requirements you haven't selected yet.
 4. A GE slot planned for later.
+
+Recommendations: an open GE slot or an unselected requirement gets a "Recommended" row above its list. It is the course with the most A's among the ones you could take that quarter (offered then, prerequisites done by then), using the listed instructor's figure for the next term when there is one. Two open slots in the same quarter get different courses. Click it to select it and plan it for that quarter. A requirement's options panel marks the same course "recommended". Nothing is selected for you, and there is no recommendation when the top option has no grade data. Either/or path choices (A + B or C) get no recommendation.
+
+Full classes: for the next term, the app knows which classes had no open section when `data/ucla-instructors.js` was last built. A class you planned that is full says "full as of <date>" (or "waitlist only") under it, and so does a full instructor in the A's line. A full class is never recommended and never offered under "If you can't take it". In option lists, classes with an open section come first, then waitlist only, then full. When some instructors of a course are full, the A's ranking uses the best one who is not. A section the department closed for another reason says nothing about seats and is ignored. Seats change by the hour during enrollment, so treat this as a snapshot and check the Schedule of Classes.
+
+Grades: every class, alternate and option shows the share of past letter grades that were A+, A or A- ("A's"). For the next term, where the Schedule of Classes names the instructors, it shows each listed instructor's own figure in that course, then the figure for all instructors. Later quarters only have the all-instructor figure. Options for the same requirement are listed most A's first, using the best listed instructor's figure when there is one and the all-instructor figure otherwise; courses with no grade data go last. The order of the classes at the top does not use grades: it is about graduating on time.
 
 Each class lists at most one option per requirement, and a course already shown under a more important class only repeats when nothing else fits. Click an alternate to see its prerequisites or its requirement's options. Drag an alternate onto a class at the top to take it that quarter instead: the alternate is moved there (and selected, if it is an option for a requirement), and the class it replaces is deferred to the next quarter it is offered. » and ≠ work the same as in the Quarter plan.
 
@@ -97,6 +105,7 @@ Pages is free on a public repo. A private repo needs GitHub Pro (included with G
 
 - UCLA General Catalog, 2026-27: https://catalog.registrar.ucla.edu/ (titles, units, requisites for every course).
 - UCLA Schedule of Classes: https://sa.ucla.edu/ro/public/soc (which courses had sections in each term, Fall 2024 through Winter 2027).
+- Grade distributions: UCLA public-records data published by https://www.uclagrades.com, read live by your browser (whatever terms that site has, Fall 2021 through Spring 2026 today). Winter 2027 instructors come from the Schedule of Classes.
 - Registrar's Department and Subject Area Codes: https://registrar.ucla.edu/faculty-staff/courses-and-programs/department-and-subject-area-codes (maps subject names in requisite text to DARS codes such as `COM SCI`).
 
 ## Course database
@@ -112,10 +121,21 @@ Pages is free on a public repo. A private repo needs GitHub Pro (included with G
 - `w2` marks a course whose catalog text says it satisfies Writing II.
 - `last` marks a course that was dropped from the current catalog. Its value is the last catalog year that listed it (2021-2025). These courses are kept because DARS still shows them.
 
+## Grade data
+
+Grades are not stored in this repo. The first time a course is shown somewhere that prints A's, the browser asks uclagrades.com for that course (`https://www.uclagrades.com/data/courses/<subject>/<number>.json`, readable from any site) and works out the percentages. Results are kept in your browser for a week. If that site is down or you are offline, the app works the same without the A's lines.
+
+The number is the percent of letter grades (A+ through F) that were A+, A or A-. P/NP, S/U, incompletes and drops are not counted. Anything with fewer than 10 letter grades has no percentage.
+
+Instructors are the one part that needs a build step, because the Schedule of Classes does not let a browser on another site read it. `data/ucla-instructors.js`, generated by `scripts/build-instructors.mjs`, lists the instructors named for the next term, what is full, and which courses each published term lists: `GRADES = { term: '27W', asOf: '2026-11-17', listed: { '27W': [codes], '27S': [codes] }, c: { [code]: { st?, p?: [{ name, st? }] } } }`, where `st` is `'full'` or `'wait'` (waitlist only) and is left out when a section is open. The browser adds `a` and `n` to each course and each listed instructor as grades arrive.
+
 ## Limitations
 
+- Grade data covers only the terms and sections uclagrades.com has (UCLA released them on request). An instructor is matched to past grades by last name and first initial within the same course. An instructor new to a course shows "no past grades", even if they taught other courses. Instructors and full classes are only known for the next term, as of the day `data/ucla-instructors.js` was built, and sections can still change hands.
+
 - Prerequisites come from the catalog's requisite sentences. About 290 courses have wording too irregular to parse; their raw catalog text shows in the detail panel instead of tree links.
-- Offerings are history, not a promise. A course that ran every Fall may still skip a year, and Winter 2027 sections were tentative when the data was pulled. Check the Schedule of Classes before you enroll.
+- For published terms the app goes by the Schedule of Classes as of the day `data/ucla-instructors.js` was built; a section added or cancelled after that is not seen until it is rebuilt. If a published term has nothing at all from a subject yet, that subject falls back to history for that term. A course's detail panel says "not in the Winter 2027 schedule" when it usually runs in that quarter but is not listed.
+- Beyond the published terms, offerings are history, not a promise. A course that ran every Fall may still skip a year, and Winter 2027 sections were tentative when the data was pulled. Check the Schedule of Classes before you enroll.
 - Many departments enroll individual-study courses (such as 199s) by contract, so the Schedule of Classes never lists them. Those are marked unknown rather than not offered.
 - The parser is tested on two real audits (both UCLA Samueli engineering majors) plus 13 synthetic audits covering Letters & Science, Arts, TFT, Music, Nursing, Luskin, Education, minors, double majors, transfer students and failed or withdrawn courses. The synthetic ones are modeled on the engine's documented format, not on real UCLA printouts. If your audit shows "lines were not understood", use "Copy diagnostic" and send it to the maintainer.
 - When an audit's course-count check disagrees with its itemized requirements, the app flags the mismatch rather than guessing which is right.
@@ -123,4 +143,4 @@ Pages is free on a public repo. A private repo needs GitHub Pro (included with G
 
 ## Privacy
 
-Everything runs in your browser. The PDF is read locally with pdf.js and nothing is sent to a server. Selections and scheduling constraints are kept in your browser's local storage. The sample audits in `sample/` are real audits with the name, student ID and letter grades removed.
+Everything runs in your browser. The PDF is read locally with pdf.js and is not sent anywhere. The one thing that leaves your browser is the grade lookup: it asks uclagrades.com for courses by code (the ones in your plan and on your requirements' option lists), so that site can see which courses were asked for. It gets nothing else from your audit. Selections and scheduling constraints are kept in your browser's local storage. The sample audits in `sample/` are real audits with the name, student ID and letter grades removed.

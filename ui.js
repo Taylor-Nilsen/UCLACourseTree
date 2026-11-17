@@ -53,7 +53,7 @@
   if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
   const NW = 200, NH = 56, COLW = 340, ROWH = 110, PAD = 40, CW = 240, CHIPW = 108, MAXCHIPS = 8, PW = 300, PROW = 46, TAGH = 22;
-  const STATUS = { done: 'Completed', ip: 'In progress', ready: 'Ready now', locked: 'Locked', placeholder: 'GE / elective slot', path: 'Select one' };
+  const STATUS = { done: 'Completed', ip: 'In progress', enrolled: 'Enrolled', ready: 'Ready now', locked: 'Locked', placeholder: 'GE / elective slot', path: 'Select one' };
   const QTR = { F: 'Fall', W: 'Winter', S: 'Spring' };
   const PIN_D = 'M10 1l5 5-2 1-3 3 .5 3.5L9 15l-3-3-4 4-1-1 4-4-3-3 1.5-1.5L7 6l3-3z';
   const PIN = '<svg class="selicon" viewBox="0 0 16 16" aria-label="selected"><path d="M10 1l5 5-2 1-3 3 .5 3.5L9 15l-3-3-4 4-1-1 4-4-3-3 1.5-1.5L7 6l3-3z" fill="currentColor"/></svg>';
@@ -115,8 +115,12 @@
   // ---------- lookups ----------
   const nodeMap = () => Object.fromEntries(S.model.nodes.map(n => [n.code, n]));
   const groupByKey = k => S.model.groups.find(g => g.key === k);
+  // status as shown: a class registered for a later quarter is "enrolled", not "in progress"
+  const shown = n => n.enrolled ? 'enrolled' : n.status;
+  const enrolledAhead = c => { const t = S.parsed.taken[c]; return !!t && (t.status || (t.grade === 'IP' ? 'ip' : 'done')) === 'ip' && DARS.termIndex(t.term) > DARS.termIndex(S.parsed.currentTerm); };
   function statusOf(code, nodes) {
-    if (nodes[code]) return nodes[code].status;
+    if (nodes[code]) return shown(nodes[code]);
+    if (enrolledAhead(code)) return 'enrolled';
     const t = S.parsed.taken[code]; // AP/transfer placeholders are already mapped to real courses by the parser (via)
     const st = t && (t.status || (t.grade === 'IP' ? 'ip' : 'done'));
     return st === 'done' || st === 'ip' ? st : 'none'; // failed / withdrawn / incomplete attempts do not count
@@ -140,6 +144,9 @@
   const isGEpc = pc => pc.paths.every(p => p.placeholder);
   const pathNeeds = p => p.ready ? 'prereqs met' : `needs ${p.unmet} prereq${p.unmet === 1 ? '' : 's'}`;
   const isPinned = (key, code) => (S.opts.choices[key] || []).includes(code);
+  // the requirement a course is your selection for (a GE list, a select-N-of-M, an "A OR B" slot), wherever the course is drawn
+  const selKey = code => Object.keys(S.opts.choices).find(k => !k.startsWith('path:') && S.opts.choices[k].includes(code));
+  const unselAttrs = code => `data-act="unselect" data-key="${esc(selKey(code))}" data-code="${esc(code)}" aria-label="Unselect ${esc(code)}" title="Unselect: put this requirement's choice back"`;
   const isGE = n => { const g = n.groupKey && groupByKey(n.groupKey); return !!(g && g.placeholder); };
   // "Fall, Spring (24F, 25S, 25F)" from the Schedule of Classes; "Not offered since ..." when it had no sections
   const qtrs = o => o.split('').map(q => QTR[q] || q).join(', ');
@@ -206,12 +213,54 @@
   }
 
   // "Title · F/W" for a long-list option: what it is and the quarters it runs
+  // published terms a course usually runs in but is missing from: "not in the Winter 2027 schedule"
+  const unlisted = c => { const k = course(c); return !k ? '' : Object.keys(G.listed || {}).filter(t => k.off.includes(t[2]) && !MODEL.offeredAt(c, k.off, DARS.termIndex({ F: 'FA', W: 'WI', S: 'SP' }[t[2]] + t.slice(0, 2))))
+    .map(t => `not in the ${QTR[t[2]]} 20${t.slice(0, 2)} schedule`).join('; '); };
   const optInfo = c => { const k = course(c); return !k ? 'not in course database' : k.t + (k.off === '' ? ' · not offered recently' : k.off === '?' ? '' : ' · ' + k.off.split('').join('/')); };
   // courses on a slot's list that can be taken in `term`; selecting one plans it for that quarter
-  const termOptions = (x, term) => !x || !x.options.length ? '' : `<details class="alts" open><summary>${x.options.length} course${x.options.length === 1 ? '' : 's'} you could take in ${esc(term)}</summary><div class="optlist tall">` +
-    x.options.slice(0, 200).map(o => optRow(x.groupKey, o.code, `${o.title} · ${o.units} u`, 'select', '', undefined, term)).join('') +
+  // Grades come live from uclagrades.com (one small JSON per course, any origin may read it) the first time a course is shown in a
+  // place that prints A's; the render that asked is repeated when they arrive. Results are kept in local storage for a week.
+  const G = MODEL.GRADES, GC = (c => c && c.term === G.term && Date.now() - c.at < 7 * 864e5 ? c : { term: G.term, at: Date.now(), c: {} })(store.get('dars.grades'));
+  // only the figures come from the cache: instructor names and seats are whatever the current data/ucla-instructors.js says
+  for (const [k, v] of Object.entries(GC.c)) if (v) { const f = G.c[k] || {}, an = x => x && x.n ? { a: x.a, n: x.n } : {};
+    G.c[k] = { ...f, ...an(v), ...(f.p && { p: f.p.map(p => ({ ...p, ...an((v.p || []).find(q => q.name === p.name)) })) }) }; }
+  const asked = new Set(Object.keys(GC.c)); let queue = [], fetching = false;
+  function want(code) {
+    if (asked.has(code) || !course(code)) return;
+    asked.add(code); queue.push(code);
+    if (!fetching) { fetching = true; setTimeout(pull); }
+  }
+  async function pull() {
+    while (queue.length) {
+      const batch = queue; let i = 0; queue = [];
+      await Promise.all(Array.from({ length: 8 }, async () => { // at most 8 requests in flight
+        while (i < batch.length) {
+          const code = batch[i++], sp = code.lastIndexOf(' ');
+          try {
+            const r = await fetch(`https://www.uclagrades.com/data/courses/${encodeURIComponent(code.slice(0, sp))}/${encodeURIComponent(code.slice(sp + 1))}.json`);
+            if (r.ok) MODEL.setGrades(code, await r.json());
+            if (r.ok || r.status === 404) GC.c[code] = r.ok ? G.c[code] : 0; // 404 = no grade data for this course
+            else asked.delete(code);
+          } catch (e) { asked.delete(code); /* offline or the site is down: the app works without grades; ask again on a later render */ }
+        }
+      }));
+      store.set('dars.grades', GC);
+      if (S.drag) S.stale = true; else render();
+    }
+    fetching = false;
+  }
+  // everything nextQuarter shows or ranks by A's: its picks, alternates and options, and every option of a select-N-of-M requirement
+  const wantPicks = r => {
+    for (const x of r.picks) [x, ...x.alts, ...x.options].forEach(o => want(o.code));
+    for (const g of S.model.groups) if (g.choice) g.alternatives.forEach(a => want(a.code));
+    return r;
+  };
+  const aText = (code, term) => (want(code), (MODEL.gradeFor(code, term) || {}).text || '');
+  const seatTag = o => o.seats ? `${o.seats} · ` : '';
+  const termOptions = (x, term) => !x || !x.options.length ? '' : `<details class="alts" open><summary>${x.options.length} course${x.options.length === 1 ? '' : 's'} you could take in ${esc(term)}, most A's first${x.options.some(o => o.seats) ? ', full classes last' : ''}</summary><div class="optlist tall">` +
+    x.options.slice(0, 200).map(o => optRow(x.groupKey, o.code, `${o.rec ? 'recommended · ' : ''}${seatTag(o)}${o.title} · ${o.units} u${o.grade ? ' · ' + o.grade.text : ''}`, 'select', o.rec ? 'rec' : '', undefined, term)).join('') +
     (x.options.length > 200 ? `<p class="muted small">Showing 200 of ${x.options.length}. Open the slot to filter the full list.</p>` : '') + '</div></details>';
-  const enrolledChips = (t, nm) => (t.enrolled || []).map(c => `<button class="pchip s-ip" data-node="${esc(c)}" title="Already enrolled for ${esc(t.term)}"><b>${esc(c)}</b><span>${esc(titleOf(c, nm))}</span><small>${esc((nm[c] || {}).units ?? '')} u · enrolled</small></button>`).join('');
+  const enrolledChips = (t, nm) => (t.enrolled || []).map(c => `<button class="pchip s-enrolled" data-node="${esc(c)}" title="Already enrolled for ${esc(t.term)}"><b>${esc(c)}</b><span>${esc(titleOf(c, nm))}</span><small>${esc((nm[c] || {}).units ?? '')} u · enrolled</small></button>`).join('');
   function optionList(g) {
     const q = (S.filters[g.key] || '').trim().toUpperCase(), pinned = S.opts.choices[g.key] || [];
     const hits = (g.options || []).filter(c => !q || c.includes(q) || ((course(c) || {}).t || '').toUpperCase().includes(q));
@@ -399,13 +448,14 @@
     const ns = nodes.filter(n => n.status !== 'path').concat(lane).map(n => {
       const p = pos[n.code], chip = n.planned || n.term || '', ready = n.status === 'ready', pinned = n.groupKey && isPinned(n.groupKey, n.code);
       const cw = chip ? chip.length * 6.2 + 12 : 0, label = n.code.startsWith('CHOOSE: ') ? 'choose: ' + n.title : n.code, fp = n.fromPath && pcByKey(n.fromPath), pf = n.pickedFor && groupByKey(n.pickedFor);
-      return `<g class="node s-${esc(n.status)}${S.detail === n.code ? ' sel' : ''}" data-node="${esc(n.code)}" transform="translate(${p.x},${p.y})" tabindex="0" role="button" aria-label="${esc(n.code + ', ' + (STATUS[n.status] || n.status) + (pinned ? ', selected' : '') + (n.critical ? '. ' + critText(n) : ''))}">
+      return `<g class="node s-${esc(shown(n))}${S.detail === n.code ? ' sel' : ''}" data-node="${esc(n.code)}" transform="translate(${p.x},${p.y})" tabindex="0" role="button" aria-label="${esc(n.code + ', ' + (STATUS[shown(n)] || n.status) + (pinned ? ', selected' : '') + (n.critical ? '. ' + critText(n) : ''))}">
         <title>${esc(n.code + ' — ' + n.title + (n.critical ? '\n* ' + critText(n) : ''))}</title><rect class="box" width="${NW}" height="${p.h}" rx="8"/>${n.critical ? '<text class="crit" x="-7" y="13" aria-hidden="true">*</text>' : ''}
         ${pinned ? `<path class="pinp" transform="translate(8,10) scale(.8)" d="${PIN_D}"/>` : ''}
         <text class="code" x="${pinned ? 24 : 10}" y="22">${esc(trunc(label, Math.floor((NW - cw - (pinned ? 32 : 18)) / 7.8)))}</text>
-        <text class="ttl" x="10" y="42">${esc(trunc(n.title, ready ? 20 : n.status === "placeholder" ? 27 : 31))}</text>${ready ? `<text class="rdy" x="${NW - 10}" y="42" text-anchor="end">ready now</text>` : ''}
+        <text class="ttl" x="10" y="42">${esc(trunc(n.title, ready || n.enrolled ? 20 : n.status === "placeholder" ? 27 : 31))}</text>${ready ? `<text class="rdy" x="${NW - 10}" y="42" text-anchor="end">ready now</text>` : n.enrolled ? `<text class="enr" x="${NW - 10}" y="42" text-anchor="end">enrolled</text>` : ''}
         ${chip ? `<rect class="chip" x="${NW - cw - 8}" y="9" width="${cw}" height="17" rx="8.5"/><text class="chipt" x="${NW - 8 - cw / 2}" y="21" text-anchor="middle">${esc(chip)}</text>` : ''}
         ${pf ? pickTag(pf, NW, p.h - 24 - (fp ? TAGH : 0)) : ''}${fp ? pathTag(fp, NW, p.h) : ''}
+        ${selKey(n.code) ? `<g class="pbtn unsel" ${unselAttrs(n.code)} transform="translate(${NW - 9},-9)" tabindex="0" role="button"><title>Unselect ${esc(n.code)}</title><circle cx="9" cy="9" r="9"/><text x="9" y="13" text-anchor="middle">×</text></g>` : ''}
       </g>`;
     }).join('');
     const cs = cgroups.map(g => choiceSvg(g, cpos[g.key])).join('') + pcs().filter(pc => pos['PATH: ' + pc.key]).map(pc => pathSvg(pc, pos['PATH: ' + pc.key], nm)).join('');
@@ -444,8 +494,8 @@
   function courseChip(c, term, nm, attrs) {
     const n = nm[c] || {}, cf = S.conflictFrom, real = !isSlotCode(c), target = real && cf && cf.term === term && cf.code !== c;
     const crit = n.critical ? `<span class="crit" role="img" aria-label="${esc(critText(n))}" title="${esc(critText(n))}">*</span>` : '';
-    const acts = real ? `<span class="pacts"><button type="button" class="pact" data-defer="${esc(c)}" aria-label="Defer ${esc(c)} to the next quarter it is offered" title="Defer to the next quarter it is offered">»</button><button type="button" class="pact" data-conflict="${esc(c)}" data-term="${esc(term)}" aria-label="Conflict: mark a class that clashes with ${esc(c)} in ${esc(term)}" title="Conflict…">≠</button></span>` : '';
-    return `<div class="pwrap${target ? ' target' : ''}${cf && cf.code === c && cf.term === term ? ' source' : ''}"${attrs ? ' draggable="true" ' + attrs : ''}>${crit}<button class="pchip s-${esc(n.status || '')}" data-node="${esc(c)}"${target ? ` data-cpick="${esc(c)}" aria-label="${esc(c + ' conflicts with ' + cf.code)}"` : ''}><b>${esc(c)}</b><span>${esc(titleOf(c, nm))}</span><small>${esc(n.units ?? '')} u</small></button>${acts}</div>`;
+    const acts = real ? `<span class="pacts"><button type="button" class="pact" data-defer="${esc(c)}" aria-label="Defer ${esc(c)} to the next quarter it is offered" title="Defer to the next quarter it is offered">»</button><button type="button" class="pact" data-conflict="${esc(c)}" data-term="${esc(term)}" aria-label="Conflict: mark a class that clashes with ${esc(c)} in ${esc(term)}" title="Conflict…">≠</button>${selKey(c) ? `<button type="button" class="pact" ${unselAttrs(c)}>×</button>` : ''}</span>` : '';
+    return `<div class="pwrap${target ? ' target' : ''}${cf && cf.code === c && cf.term === term ? ' source' : ''}"${attrs ? ' draggable="true" ' + attrs : ''}>${crit}<button class="pchip s-${esc(shown(n) || '')}" data-node="${esc(c)}"${target ? ` data-cpick="${esc(c)}" aria-label="${esc(c + ' conflicts with ' + cf.code)}"` : ''}><b>${esc(c)}</b><span>${esc(titleOf(c, nm))}</span><small>${esc(n.units ?? '')} u</small></button>${acts}</div>`;
   }
   function renderCfStatus() {
     const cf = S.conflictFrom;
@@ -458,12 +508,12 @@
   // "What to take next": one column per class of the chosen quarter (most important left), alternates under it (best on top).
   // » defers a class, ≠ marks a conflict; an alternate opens its course or its options panel, or is dragged onto a class to take it instead.
   function renderNext() {
-    const r = MODEL.nextQuarter(S.model, S.nextTerm, { defers: S.opts.defers }), nm = nodeMap();
+    const r = wantPicks(MODEL.nextQuarter(S.model, S.nextTerm, { defers: S.opts.defers })), nm = nodeMap();
     renderCfStatus();
     $('#nextterm').innerHTML = r.terms.map(t => `<option value="${esc(t)}"${t === r.term ? ' selected' : ''}>${esc(t)}${t === r.terms[0] ? ' (next)' : ''}</option>`).join('');
     const alt = a => {
       const open = nm[a.code] ? `data-node="${esc(a.code)}"` : a.groupKey ? `data-group="${esc(a.groupKey)}"` : '';
-      return `<a href="#" class="nalt" draggable="true" data-drag="${esc(a.code)}"${a.groupKey && !nm[a.code] ? ` data-gk="${esc(a.groupKey)}"` : ''} ${open}><b>${esc(a.code)}</b><span>${esc(a.title)}</span><small>${esc(a.why)}</small></a>`;
+      return `<a href="#" class="nalt" draggable="true" data-drag="${esc(a.code)}"${a.groupKey && !nm[a.code] ? ` data-gk="${esc(a.groupKey)}"` : ''} ${open}><b>${esc(a.code)}</b><span>${esc(a.title)}</span><small>${esc(a.why)}${a.seats ? ' · ' + esc(a.seats) + ' only' : ''}</small>${a.grade ? `<small>${esc(a.grade.text)}</small>` : ''}</a>`;
     };
     const pt = (S.model.plan || []).find(t => t.term === r.term) || {};
     $('#next').innerHTML = ((pt.enrolled || []).length ? `<div class="ncol"><div class="nrank">already enrolled</div>${enrolledChips(pt, nm)}</div>` : '') + r.picks.map((x, i) => {
@@ -471,7 +521,8 @@
       const top = x.code.startsWith('CHOOSE: ')
         ? `<button class="pchip choose" ${n.pathChoiceKey ? `data-path="${esc(n.pathChoiceKey)}"` : `data-group="${esc(n.groupKey)}"`}><b>choose: ${esc(n.title)}</b><small>${esc(x.units)} u</small></button>`
         : courseChip(x.code, r.term, nm, '');
-      return `<div class="ncol"><div class="nrank">#${i + 1}${i || x.slot ? '' : ' most important'}</div><div class="ntop" data-drop="next" data-out="${esc(x.code)}" data-term="${esc(r.term)}">${top}</div><span class="nwhy">${esc(x.why)}</span>
+      return `<div class="ncol"><div class="nrank">#${i + 1}${i || x.slot ? '' : ' most important'}</div><div class="ntop" data-drop="next" data-out="${esc(x.code)}" data-term="${esc(r.term)}">${top}</div><span class="nwhy">${esc(x.why)}${x.grade ? `<br>${esc(x.grade.text)}` : ''}</span>
+        ${x.rec ? `<div class="nalt-h">Recommended, most A's of what you can take in ${esc(r.term)}:</div>${(o => optRow(x.groupKey, o.code, `${o.grade.a}% A's${o.grade.prof ? ' with ' + o.grade.prof : ''} · ${o.title}`, 'select', 'rec', undefined, r.term))(x.options.find(o => o.rec))}` : ''}
         ${termOptions(x, r.term)}${x.alts.length ? `<div class="nalt-h">If you can't take it:</div>${x.alts.map(alt).join('')}` : x.slot ? '' : '<div class="nalt-h">Nothing else can be taken this quarter in its place.</div>'}</div>`;
     }).join('') || '<p class="muted pad">Nothing left to plan.</p>';
   }
@@ -542,7 +593,7 @@
   // dropped in a quarter it isn't offered in: offer the nearest offered quarters, one before and one after
   function offerNearest(code, term) {
     const n = nodeMap()[code], ti = DARS.termIndex(term), t0 = DARS.termIndex(S.model.currentTerm);
-    const okAt = u => (S.opts.useSummer || u % 4 !== 3) && (n.offered === '?' || n.offered.includes('FWSU'[u % 4]));
+    const okAt = u => (S.opts.useSummer || u % 4 !== 3) && MODEL.offeredAt(n.code, n.offered, u);
     let before = null, after = null;
     for (let u = ti - 1; u > t0 && before == null; u--) if (okAt(u)) before = u;
     for (let u = ti + 1; u <= ti + 8 && after == null; u++) if (okAt(u)) after = u;
@@ -562,16 +613,18 @@
   }
 
   function groupDetail(g, nm) {
+    g.alternatives.forEach(a => want(a.code));
+    const recs = MODEL.recommend(S.model, g.key, { defers: S.opts.defers });
     const rows = choiceOpts(g).map(o => {
       const c = course(o.code) || {}, pre = preHtml(c.pre, nm);
       return `<div class="optd${o.pinned ? ' on' : ''}"><div class="optd-h">${o.pinned ? PIN : `<i class="dot${o.ready ? ' ok' : ''}" title="${o.ready ? 'prereqs met' : 'prereqs missing'}"></i>`}
-        <b>${nm[o.code] ? `<a href="#" data-node="${esc(o.code)}">${esc(o.code)}</a>` : esc(o.code)}</b><span class="muted small">${esc(c.u ?? '?')} u</span>
+        <b>${nm[o.code] ? `<a href="#" data-node="${esc(o.code)}">${esc(o.code)}</a>` : esc(o.code)}</b><span class="muted small">${esc(c.u ?? '?')} u</span>${recs.includes(o.code) ? '<span class="rectag">recommended</span>' : ''}
         <button class="btn sm" data-act="${o.pinned ? 'unselect' : 'select'}" data-key="${esc(g.key)}" data-code="${esc(o.code)}">${o.pinned ? 'Unselect' : 'Select'}</button></div>
         <div class="small">${esc(c.t || 'Not in the course database')}</div>
-        <div class="small muted">Offered: ${esc(offeredText(o.code))}</div>
+        <div class="small muted">Offered: ${esc(offeredText(o.code))}${unlisted(o.code) ? '; ' + esc(unlisted(o.code)) : ''}</div>
         ${pre ? `<ul class="prelist small">${pre}</ul>` : `<div class="small muted">${c.t ? 'No prerequisites' : 'Prerequisites unknown'}</div>`}
         ${c.req ? `<div class="small muted">Catalog: ${esc(c.req)}</div>` : ''}
-        ${o.why ? `<div class="small muted">${esc(o.why)}</div>` : ''}</div>`;
+        ${o.why ? `<div class="small muted">${esc(o.why)}</div>` : ''}${aText(o.code) ? `<div class="small muted">${esc(aText(o.code))}</div>` : ''}</div>`;
     }).join('');
     // open slots, or which selection a new one replaces (pin() drops the oldest)
     const mine = S.opts.choices[g.key] || [], left = g.need - g.chosen.filter(c => !c.auto).length;
@@ -581,7 +634,8 @@
       <h2>${esc(pickLabel(g))}</h2><p>${esc(g.name)}<br><small class="muted">${esc(g.section)}</small></p>${slots}
       ${takenPathOf(g.key) ? partOf(takenPathOf(g.key)) : ''}
       ${g.selected === false && pcOfGroup(g.key) ? `<p class="small">One path of ${esc(pcOfGroup(g.key).title)}. Selecting an option here selects this path. <a href="#" data-path="${esc(pcOfGroup(g.key).key)}">Compare paths</a></p>` : ''}
-      <p class="small muted">Green dot: prerequisites done, in progress or selected. Grey: something is still missing.</p>${rows}`;
+      ${recs.length ? `<p class="small"><b>Recommended: ${esc(recs.join(', '))}</b>. Most A's among the options you can take in the quarter the open slot is planned for.</p>` : ''}
+      <p class="small muted">Green dot: prerequisites done, in progress or selected. Grey: something is still missing (a class you are only enrolled in for a later quarter is not done yet).</p>${rows}`;
   }
 
   function pathDetail(pc, nm) {
@@ -609,23 +663,25 @@
     if (pc) { d.innerHTML = pathDetail(pc, nm); d.hidden = false; return; }
     if (!grp && !n) { d.hidden = true; S.detail = null; return; }
     if (grp) { d.innerHTML = groupDetail(grp, nm); d.hidden = false; return; }
-    const g = n.groupKey && groupByKey(n.groupKey), pinned = g && isPinned(g.key, n.code);
+    const g = n.groupKey && groupByKey(n.groupKey), pinned = !!selKey(n.code);
     const off = course(n.code) ? offeredText(n.code) : n.offered ? qtrs(n.offered) : 'Not currently offered';
     const pre = preHtml(n.prereqs, nm);
     d.innerHTML = `<button class="close" data-close aria-label="Close">×</button>
       <h2>${pinned ? PIN + ' ' : ''}${esc(n.code)}</h2><p>${esc(n.title)}</p>
       ${n.fromPath && takenPathOf(n.groupKey) ? partOf(takenPathOf(n.groupKey)) : ''}
       ${n.pickedFor && groupByKey(n.pickedFor) ? `<p class="small">Selected for: ${esc(groupByKey(n.pickedFor).name)} <button class="btn sm" data-group="${esc(n.pickedFor)}">Change selection</button></p>` : ''}
-      ${pinned ? `<p><button class="btn sm" data-act="unselect" data-key="${esc(g.key)}" data-code="${esc(n.code)}">Unselect</button></p>` : ''}
-      <dl><dt>Status</dt><dd><i class="badge s-${esc(n.status)}">${esc(STATUS[n.status] || n.status)}</i></dd>
+      ${pinned ? `<p><button class="btn primary" ${unselAttrs(n.code)}>Unselect this class</button></p>` : ''}
+      <dl><dt>Status</dt><dd><i class="badge s-${esc(shown(n))}">${esc(STATUS[shown(n)] || n.status)}</i></dd>
       <dt>Units</dt><dd>${esc(n.units)}</dd>
-      ${n.term ? `<dt>Taken</dt><dd>${esc(n.term)}</dd>` : ''}${n.planned ? `<dt>Planned</dt><dd>${esc(n.planned)}${n.critical ? ` <span class="crit-t">* ${esc(critText(n))}</span>` : n.slack ? ` <small class="muted">(can slip ${esc(n.slack)}${n.slack >= 4 ? '+' : ''} offered quarter${n.slack === 1 ? '' : 's'})</small>` : ''}</dd>` : ''}
-      <dt>Offered</dt><dd>${esc(off)}</dd>
+      ${n.term ? `<dt>${n.enrolled ? 'Enrolled for' : 'Taken'}</dt><dd>${esc(n.term)}</dd>` : ''}${n.planned ? `<dt>Planned</dt><dd>${esc(n.planned)}${n.critical ? ` <span class="crit-t">* ${esc(critText(n))}</span>` : n.slack ? ` <small class="muted">(can slip ${esc(n.slack)}${n.slack >= 4 ? '+' : ''} offered quarter${n.slack === 1 ? '' : 's'})</small>` : ''}</dd>` : ''}
+      <dt>Offered</dt><dd>${esc(off)}${unlisted(n.code) ? `<br><small class="muted">${esc(unlisted(n.code))}</small>` : ''}</dd>
+      ${MODEL.seatsFor(n.code, n.planned) ? `<dt>Seats</dt><dd>${MODEL.seatsFor(n.code, n.planned) === 'full' ? 'Full' : 'Waitlist only'} in ${esc(n.planned)} <small class="muted">as of ${esc(G.asOf)}; check the Schedule of Classes</small></dd>` : ''}
+      ${aText(n.code, n.planned) ? `<dt>Grades</dt><dd>${esc(aText(n.code, n.planned).replace(/^A's: /, ''))}<br><small class="muted">share of past letter grades that were A+, A or A-</small></dd>` : ''}
       ${g ? `<dt>Satisfies</dt><dd>${esc(g.name)}<br><small class="muted">${esc(g.section)}</small></dd>` : ''}</dl>
       ${g && !g.placeholder && (g.choice || (g.altGroupKeys || []).length) ? `<p><a href="#" data-group="${esc(g.key)}">All options for this requirement</a></p>` : ''}
       <h3>Prerequisites</h3>${pre ? `<ul class="prelist">${pre}</ul>` : '<p class="muted">None</p>'}
       ${n.pathPrereq ? '<p class="muted small">Only an option you have not selected yet needs this, so it is not in the plan.</p>' : ''}
-      ${n.status === 'placeholder' && g && g.placeholder ? `<h3>Select a course</h3>${n.planned ? termOptions(MODEL.nextQuarter(S.model, n.planned, { defers: S.opts.defers }).picks.find(x => x.code === n.code), n.planned) : ''}
+      ${n.status === 'placeholder' && g && g.placeholder ? `<h3>Select a course</h3>${n.planned ? termOptions(wantPicks(MODEL.nextQuarter(S.model, n.planned, { defers: S.opts.defers })).picks.find(x => x.code === n.code), n.planned) : ''}
         <p class="small muted">All ${esc(g.optionCount)} options (code or title):</p><input type="search" class="filter" data-filter="${esc(g.key)}" placeholder="Filter options" value="${esc(S.filters[g.key] || '')}">
         <div class="optlist tall" data-list="${esc(g.key)}">${optionList(g)}</div>` : n.status === 'placeholder' ? '<p class="muted small">Select a specific course for this slot in the requirements panel.</p>' : ''}
       ${n.req ? `<h3>Catalog requisites</h3><p>${esc(n.req)}</p>` : ''}`;
@@ -741,7 +797,7 @@
     e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', el.dataset.drag);
   });
   document.addEventListener('dragover', e => { const z = dropZone(e); if (!z) return; e.preventDefault(); if (!z.classList.contains('over')) { clearOver(); z.classList.add('over'); } });
-  document.addEventListener('dragend', () => { S.drag = null; clearOver(); });
+  document.addEventListener('dragend', () => { S.drag = null; clearOver(); if (S.stale) { S.stale = false; render(); } });
   document.addEventListener('drop', e => {
     const z = dropZone(e); if (!z) return;
     e.preventDefault(); clearOver();
@@ -749,7 +805,7 @@
     if (z.dataset.drop === 'plan') {
       if (d.from === undefined || d.from === term) return;
       const n = nodeMap()[d.code], q = 'FWSU'[DARS.termIndex(term) % 4];
-      return n.offered === '?' || n.offered.includes(q) ? tryChange({ type: 'move', code: d.code, term }) : offerNearest(d.code, term);
+      return MODEL.offeredAt(n.code, n.offered, DARS.termIndex(term)) ? tryChange({ type: 'move', code: d.code, term }) : offerNearest(d.code, term);
     }
     if (d.from !== undefined || d.code === z.dataset.out) return; // "next" zones take alternates only
     const prev = { opts: JSON.parse(JSON.stringify(S.opts)), model: S.model };

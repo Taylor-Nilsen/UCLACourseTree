@@ -6,6 +6,9 @@ const { DARS } = require('../parser.js');
 const { COURSES } = require('../data/ucla-courses.js');
 const { MODEL } = require('../model.js');
 const { TREE_LAYOUT } = require('../ui.js');
+// The published-term listings change with every rebuild of data/ucla-instructors.js; these tests plan from the offering history
+// alone so their expectations hold. The listing rule has its own test at the end.
+delete MODEL.GRADES.listed;
 // synthetic courses (subject ZZ) so the offering rules are tested independently of the generated data
 Object.assign(COURSES, Object.fromEntries([
   ['ZZ 10', 'FWS'], ['ZZ 11', 'FWS'], ['ZZ 12', 'FWS'], ['ZZ 13', 'FWS'], ['ZZ 14', 'FWS'], ['ZZ 15', 'FWS'],
@@ -469,5 +472,77 @@ t('real L&S transfer audit: substitutions, classes enrolled ahead, GE slots list
   const ha = mo.groups.find(g => g.name === 'ONE HISTORICAL ANALYSIS COURSE'), dv = mo.groups.find(g => g.section === 'L&S DIVERSITY');
   const both = ha.options.find(c => dv.options.includes(c)), dbl = MODEL.build(R, { ...opts, choices: { [ha.key]: [both] } });
   assert.deepEqual(dbl.groups.find(g => g.key === dv.key).chosen.map(c => c.code), [both]);
+});
+t("grades: A percentage orders one requirement's options; a listed instructor's own figure is used for that term only", () => {
+  const { GRADES } = MODEL;
+  GRADES.term = '27W';
+  Object.assign(GRADES.c, { 'ZZ 11': { a: 40, n: 100 }, 'ZZ 12': { a: 30, n: 200, p: [{ name: 'Bruin, J.', a: 80, n: 50 }, { name: 'New, N.' }] } });
+  assert.equal(MODEL.gradeFor('ZZ 10', 'WI27'), null);
+  assert.deepEqual([MODEL.gradeFor('ZZ 12', 'WI27').a, MODEL.gradeFor('ZZ 12', 'WI27').prof], [80, 'Bruin, J.']);
+  assert.equal(MODEL.gradeFor('ZZ 12', 'WI27').text, "A's: Bruin, J. 80%, New, N. no past grades, all instructors 30%");
+  assert.deepEqual([MODEL.gradeFor('ZZ 12', 'SP27').a, MODEL.gradeFor('ZZ 12', 'SP27').prof, MODEL.gradeFor('ZZ 12', 'SP27').text], [30, null, "A's: all instructors 30%"]);
+  const p = synth([['PICK', 1, [zz('ZZ 10'), zz('ZZ 11'), zz('ZZ 12')]], ['REQ', 2, [zz('ZZ 13'), zz('ZZ 14')]]]);
+  const key = MODEL.build(p, {}).groups[0].key, mm = MODEL.build(p, { perQuarter: 3, choices: { [key]: ['ZZ 10'] } });
+  const x = MODEL.nextQuarter(mm, 'WI27').picks.find(x => x.code === 'ZZ 10');
+  assert.deepEqual(x.alts.map(a => [a.code, a.grade.a]), [['ZZ 12', 80], ['ZZ 11', 40]]); assert.equal(x.grade, null);
+  const slot = MODEL.nextQuarter(MODEL.build(p, { perQuarter: 3 })).picks.find(x => x.slot);
+  assert.deepEqual(slot.options.map(o => o.code), ['ZZ 12', 'ZZ 11', 'ZZ 10']); // no grade data goes last
+  assert.deepEqual(slot.alts.map(a => a.code), ['ZZ 12', 'ZZ 11', 'ZZ 10']);
+  // the open slot recommends the option with the most A's; no recommendation without grade data or once the selection is made
+  assert.equal(slot.rec, 'ZZ 12'); assert.deepEqual(slot.options.map(o => !!o.rec), [true, false, false]);
+  assert.deepEqual(MODEL.recommend(MODEL.build(p, { perQuarter: 3 }), key), ['ZZ 12']); assert.deepEqual(MODEL.recommend(mm, key), []);
+  const two = synth([['TWO', 2, [zz('ZZ 10'), zz('ZZ 11'), zz('ZZ 12')]]]), k2 = MODEL.build(two, {}).groups[0].key;
+  assert.deepEqual(MODEL.recommend(MODEL.build(two, { perQuarter: 3 }), k2), ['ZZ 12', 'ZZ 11']);
+  const none = synth([['NONE', 1, [zz('ZZ 13'), zz('ZZ 15')]]]), kn = MODEL.build(none, {}).groups[0].key;
+  assert.deepEqual(MODEL.recommend(MODEL.build(none, {}), kn), []);
+});
+t('setGrades: uclagrades.com rows become A percentages; co-taught rows count once; listed instructors match by last name + initial', () => {
+  const row = (term, sect, grd, k, who) => ({ enrollmentTerm: term, sectionNumber: sect, gradeOffered: grd, gradeCount: String(k), instructorName: who });
+  MODEL.GRADES.c['ZZ 13'] = { p: [{ name: 'Bruin, J.B.' }, { name: 'Other, O.' }] };
+  const e = MODEL.setGrades('ZZ 13', [row('25F', '1', 'A', 30, 'BRUIN, JOSEPHINE B'), row('25F', '1', 'B+', 10, 'BRUIN, JOSEPHINE B'), row('25F', '1', 'P', 50, 'BRUIN, JOSEPHINE B'),
+    row('26W', '1', 'A-', 10, 'SMITH, AL'), row('26W', '1', 'A-', 10, 'JONES, BO'), row('26W', '1', 'F', 50, 'SMITH, AL'), row('26W', '1', 'F', 50, 'JONES, BO')]);
+  assert.deepEqual(e, { a: 40, n: 100, p: [{ name: 'Bruin, J.B.', a: 75, n: 40 }, { name: 'Other, O.' }] });
+  assert.deepEqual(MODEL.setGrades('ZZ 14', [row('25F', '1', 'A', 9, 'X, Y')]), {}); assert.equal(MODEL.gradeFor('ZZ 14', 'WI27'), null);
+});
+t('seats: a full class is listed last, is never recommended or offered as an alternate, and a full instructor is not the one ranked on', () => {
+  const G = MODEL.GRADES; G.term = '27W'; G.asOf = '2026-11-17';
+  Object.assign(G.c, { 'ZZ 10': { a: 20, n: 50 }, 'ZZ 11': { a: 40, n: 100, st: 'wait' }, 'ZZ 12': { a: 90, n: 200, st: 'full', p: [{ name: 'Full, F.', a: 95, n: 50, st: 'full' }, { name: 'Open, O.', a: 60, n: 50 }] } });
+  assert.deepEqual([MODEL.seatsFor('ZZ 12', 'WI27'), MODEL.seatsFor('ZZ 11', 'WI27'), MODEL.seatsFor('ZZ 10', 'WI27'), MODEL.seatsFor('ZZ 12', 'SP27')], ['full', 'waitlist', null, null]);
+  assert.deepEqual([MODEL.gradeFor('ZZ 12', 'WI27').prof, MODEL.gradeFor('ZZ 12', 'WI27').a], ['Open, O.', 60]);
+  assert.match(MODEL.gradeFor('ZZ 12', 'WI27').text, /Full, F\. 95% \(full\), Open, O\. 60%/);
+  const p = synth([['PICK', 1, [zz('ZZ 10'), zz('ZZ 11'), zz('ZZ 12')]], ['REQ', 2, [zz('ZZ 13'), zz('ZZ 14')]]]), key = MODEL.build(p, {}).groups[0].key;
+  const slot = MODEL.nextQuarter(MODEL.build(p, { perQuarter: 3 }), 'WI27').picks.find(x => x.slot);
+  assert.deepEqual(slot.options.map(o => [o.code, o.seats]), [['ZZ 10', null], ['ZZ 11', 'waitlist'], ['ZZ 12', 'full']]); assert.equal(slot.rec, 'ZZ 10');
+  assert.deepEqual(slot.alts.map(a => a.code), ['ZZ 10', 'ZZ 11']);
+  const mine = MODEL.nextQuarter(MODEL.build(p, { perQuarter: 3, choices: { [key]: ['ZZ 12'] } }), 'WI27').picks.find(x => x.code === 'ZZ 12');
+  assert.match(mine.why, /full as of 2026-11-17$/); assert.equal(mine.seats, 'full');
+  delete G.c['ZZ 10']; delete G.c['ZZ 11']; delete G.c['ZZ 12'];
+});
+t('nextQuarter: a class enrolled for the coming quarter is not a met prerequisite in that same quarter', () => {
+  const p = synth([['A', 1, [zz('ZZ 22')]], ['B', 2, [zz('ZZ 10'), zz('ZZ 11')]]]);
+  p.taken = { 'ZZ 21': { term: 'WI27', units: 4, grade: 'IP', status: 'ip', title: 'ZZ 21' } }; // ZZ 22 needs ZZ 21 and runs in Winter only
+  const mm = MODEL.build(p, { perQuarter: 2 }), codes = t => MODEL.nextQuarter(mm, t).picks.flatMap(x => [x.code, ...x.alts.map(a => a.code)]);
+  assert.deepEqual(mm.plan[0].enrolled, ['ZZ 21']); assert.equal(mm.nodes.find(x => x.code === 'ZZ 22').planned, 'WI28');
+  assert.ok(!codes('WI27').includes('ZZ 22'), codes('WI27').join()); assert.ok(codes('WI28').includes('ZZ 22'));
+  // it is "enrolled", not in progress, and what needs it is locked, not ready
+  assert.equal(mm.nodes.find(x => x.code === 'ZZ 21').enrolled, true); assert.equal(mm.nodes.find(x => x.code === 'ZZ 22').status, 'locked');
+  const now = synth([['A', 1, [zz('ZZ 22')]], ['B', 2, [zz('ZZ 10'), zz('ZZ 11')]]]); // in progress this quarter: done by next quarter, so it counts
+  now.taken = { 'ZZ 21': { term: 'FA26', units: 4, grade: 'IP', status: 'ip', title: 'ZZ 21' } };
+  const nb = MODEL.build(now, { perQuarter: 1 }); assert.equal(nb.nodes.find(x => x.code === 'ZZ 22').planned, 'WI27');
+  assert.equal(nb.nodes.find(x => x.code === 'ZZ 21').enrolled, undefined); assert.equal(nb.nodes.find(x => x.code === 'ZZ 22').status, 'ready');
+});
+t('offered: a published term goes by its listing, other terms and unposted subjects by the quarters a course has run in', () => {
+  const G = MODEL.GRADES, W = DARS.termIndex('WI27'), S = DARS.termIndex('SP27'), W28 = DARS.termIndex('WI28');
+  G.listed = { '27W': ['ZZ 10', 'ZZ 32'], '27S': ['ZZ 11'] }; // ZZ 32 has only ever run in Spring; ZZ 33 only in Winter
+  assert.deepEqual(['ZZ 10', 'ZZ 11', 'ZZ 32', 'ZZ 33'].map(c => MODEL.offeredAt(c, COURSES[c].off, W)), [true, false, true, false]);
+  assert.deepEqual(['ZZ 10', 'ZZ 11', 'ZZ 32'].map(c => MODEL.offeredAt(c, COURSES[c].off, S)), [false, true, false]);
+  assert.deepEqual(['ZZ 11', 'ZZ 32', 'ZZ 33'].map(c => MODEL.offeredAt(c, COURSES[c].off, W28)), [true, false, true]); // not published: history
+  assert.equal(MODEL.offeredAt('MATH 32A', 'FWS', W), true); assert.equal(MODEL.offeredAt('ZZ 11', '?', W), true); // subject not posted; unlisted tutorial
+  const p = synth([['R', 2, [zz('ZZ 10'), zz('ZZ 11')]]]), mm = MODEL.build(p, { perQuarter: 2 });
+  assert.deepEqual(mm.plan.map(x => [x.term, x.courses]), [['WI27', ['ZZ 10']], ['SP27', ['ZZ 11']]]);
+  const pick = synth([['PICK', 1, [zz('ZZ 10'), zz('ZZ 11'), zz('ZZ 12')]]]), slot = MODEL.nextQuarter(MODEL.build(pick, {}), 'WI27').picks[0];
+  assert.deepEqual(slot.options.map(o => o.code), ['ZZ 10']); // ZZ 11 and ZZ 12 run most Winters but are not in this one
+  assert.match(MODEL.build(p, { pins: { 'ZZ 11': 'WI27' } }).warnings.join(), /move of ZZ 11 to WI27: it is not offered in Winter 27 \(not in the Schedule of Classes/);
+  delete G.listed;
 });
 console.log(n + ' passed');

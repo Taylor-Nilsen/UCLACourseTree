@@ -42,4 +42,12 @@ t('dangling prerequisite references < 3%', () => {
   for (const e of Object.values(D)) for (const g of e.pre) for (const c of g) { refs++; if (!D[c]) bad++; }
   assert.ok(refs > 3000); assert.ok(bad / refs < 0.03, `${bad}/${refs} dangling`);
 });
+t('instructors file: every key is a course and lists named instructors for one term', () => {
+  const { GRADES: G } = require('../data/ucla-instructors.js'), v = Object.values(G.c);
+  assert.match(G.term, /^\d\d[FWS]$/); assert.ok(statSync(new URL('../data/ucla-instructors.js', import.meta.url)).size < 1e6);
+  for (const k of Object.keys(G.c)) assert.ok(D[k], k);
+  assert.ok(v.filter(e => e.p).length > 1000); assert.ok(v.every(e => (e.st || e.p) && (e.p || []).every(p => p.name && !/tentative|staff/i.test(p.name))));
+  assert.match(G.asOf, /^\d{4}-\d\d-\d\d$/); assert.ok(G.listed[G.term].length > 1000 && Object.values(G.listed).every(a => a.every(k => D[k])));
+  assert.ok(Object.keys(G.c).every(k => G.listed[G.term].includes(k))); assert.ok(v.every(e => [undefined, 'full', 'wait'].includes(e.st))); assert.ok(v.some(e => e.st === 'full'));
+});
 console.log(`${n} coursedb tests passed`);
