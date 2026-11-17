@@ -6,6 +6,9 @@ const { DARS } = require('../parser.js');
 const { COURSES } = require('../data/ucla-courses.js');
 const { MODEL } = require('../model.js');
 const { TREE_LAYOUT } = require('../ui.js');
+// The published-term listings change with every rebuild of data/ucla-instructors.js; these tests plan from the offering history
+// alone so their expectations hold. The listing rule has its own test at the end.
+delete MODEL.GRADES.listed;
 // synthetic courses (subject ZZ) so the offering rules are tested independently of the generated data
 Object.assign(COURSES, Object.fromEntries([
   ['ZZ 10', 'FWS'], ['ZZ 11', 'FWS'], ['ZZ 12', 'FWS'], ['ZZ 13', 'FWS'], ['ZZ 14', 'FWS'], ['ZZ 15', 'FWS'],
@@ -527,5 +530,19 @@ t('nextQuarter: a class enrolled for the coming quarter is not a met prerequisit
   now.taken = { 'ZZ 21': { term: 'FA26', units: 4, grade: 'IP', status: 'ip', title: 'ZZ 21' } };
   const nb = MODEL.build(now, { perQuarter: 1 }); assert.equal(nb.nodes.find(x => x.code === 'ZZ 22').planned, 'WI27');
   assert.equal(nb.nodes.find(x => x.code === 'ZZ 21').enrolled, undefined); assert.equal(nb.nodes.find(x => x.code === 'ZZ 22').status, 'ready');
+});
+t('offered: a published term goes by its listing, other terms and unposted subjects by the quarters a course has run in', () => {
+  const G = MODEL.GRADES, W = DARS.termIndex('WI27'), S = DARS.termIndex('SP27'), W28 = DARS.termIndex('WI28');
+  G.listed = { '27W': ['ZZ 10', 'ZZ 32'], '27S': ['ZZ 11'] }; // ZZ 32 has only ever run in Spring; ZZ 33 only in Winter
+  assert.deepEqual(['ZZ 10', 'ZZ 11', 'ZZ 32', 'ZZ 33'].map(c => MODEL.offeredAt(c, COURSES[c].off, W)), [true, false, true, false]);
+  assert.deepEqual(['ZZ 10', 'ZZ 11', 'ZZ 32'].map(c => MODEL.offeredAt(c, COURSES[c].off, S)), [false, true, false]);
+  assert.deepEqual(['ZZ 11', 'ZZ 32', 'ZZ 33'].map(c => MODEL.offeredAt(c, COURSES[c].off, W28)), [true, false, true]); // not published: history
+  assert.equal(MODEL.offeredAt('MATH 32A', 'FWS', W), true); assert.equal(MODEL.offeredAt('ZZ 11', '?', W), true); // subject not posted; unlisted tutorial
+  const p = synth([['R', 2, [zz('ZZ 10'), zz('ZZ 11')]]]), mm = MODEL.build(p, { perQuarter: 2 });
+  assert.deepEqual(mm.plan.map(x => [x.term, x.courses]), [['WI27', ['ZZ 10']], ['SP27', ['ZZ 11']]]);
+  const pick = synth([['PICK', 1, [zz('ZZ 10'), zz('ZZ 11'), zz('ZZ 12')]]]), slot = MODEL.nextQuarter(MODEL.build(pick, {}), 'WI27').picks[0];
+  assert.deepEqual(slot.options.map(o => o.code), ['ZZ 10']); // ZZ 11 and ZZ 12 run most Winters but are not in this one
+  assert.match(MODEL.build(p, { pins: { 'ZZ 11': 'WI27' } }).warnings.join(), /move of ZZ 11 to WI27: it is not offered in Winter 27 \(not in the Schedule of Classes/);
+  delete G.listed;
 });
 console.log(n + ' passed');

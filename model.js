@@ -20,6 +20,20 @@
     const e = GRADES.c[code] || {};
     return GRADES.c[code] = { ...e, ...gradeStat(rows), ...(e.p && { p: e.p.map(p => ({ ...p, ...gradeStat(rows.filter(r => profKey(r.instructorName) === profKey(p.name))) })) }) };
   }
+  // Is `code` (whose history says it runs in the quarters `off`: 'FWS' letters, '?' = any) offered in term index ti? For a term
+  // the Schedule of Classes has published (GRADES.listed) the answer is the schedule itself: listed or not. For any other term,
+  // and for a subject the published term has nothing from yet, it is the quarters the course has run in.
+  const qOf = t => 'FWSU'[((t % 4) + 4) % 4], subjOf = c => c.slice(0, c.lastIndexOf(' ')), sets = new Map();
+  const listedSet = ti => {
+    const a = qOf(ti) !== 'U' && (GRADES.listed || {})[DARS.termName(ti).slice(2) + qOf(ti)];
+    if (a && !sets.has(a)) sets.set(a, { codes: new Set(a), subjects: new Set(a.map(subjOf)) });
+    return a ? sets.get(a) : null;
+  };
+  function offeredAt(code, off, ti) {
+    if (off === '?') return true;
+    const L = COURSES[code] && listedSet(ti);
+    return L && L.subjects.has(subjOf(code)) ? L.codes.has(code) : (off || '').includes(qOf(ti));
+  }
   // Seats in the term GRADES covers, as of GRADES.asOf: 'full' (no open section, no waitlist), 'waitlist' (none open, a waitlist is), else null.
   const SEAT = { full: 'full', wait: 'waitlist' };
   const seatsFor = (code, term) => term && GRADES.term === term.slice(2) + term[0] && SEAT[(GRADES.c[code] || {}).st] || null;
@@ -329,7 +343,6 @@
     // classes already enrolled for a later quarter (WI27 on a FA26 audit) take seats there and only count as prereqs after it
     const ahead = Object.entries(taken).filter(([, x]) => st(x) === 'ip' && !x.subst && DARS.termIndex(x.term) > t0).map(([c, x]) => [c, DARS.termIndex(x.term)]);
     const have0 = Object.keys(taken).filter(c => !ahead.some(a => a[0] === c));
-    const qOf = t => 'FWSU'[((t % 4) + 4) % 4];
     const usable = t => opts.useSummer || qOf(t) !== 'U';
     // notBefore: code -> earliest term index (defers, what-if slips); ban: code -> term indexes it may not use (conflicts);
     // pins: code -> term index the user moved it to. A pinned course waits for that term and takes a seat first there (even past
@@ -342,7 +355,7 @@
         quarters++;
         const seats = per - ahead.filter(a => a[1] === t).length;
         for (const [c, at] of ahead) if (at < t) have.add(c);
-        const q = qOf(t), ok = n => (n.offered === '?' || n.offered.includes(q)) && !(ban.get(n.code) || NONE).has(t) && n.prereqs.every(grp => grp.some(x => have.has(x)));
+        const ok = n => offeredAt(n.code, n.offered, t) && !(ban.get(n.code) || NONE).has(t) && n.prereqs.every(grp => grp.some(x => have.has(x)));
         const picks = left.concat(sl).filter(n => pins.get(n.code) === t && ok(n)), free = n => !picks.includes(n) && !(pins.get(n.code) > t);
         for (const n of left) {
           if (picks.length >= seats) break;
@@ -360,7 +373,7 @@
     const tn = t => t == null ? 'nowhere' : DARS.termName(t);
     // quarters between two terms, not counting summers when summer is off
     const ord = t => opts.useSummer ? t : t - Math.floor((t + 1) / 4);
-    const nextOff = (n, t) => { for (let u = t + 1; u <= t + 8; u++) if (usable(u) && (n.offered === '?' || n.offered.includes(qOf(u)))) return u; return null; };
+    const nextOff = (n, t) => { for (let u = t + 1; u <= t + 8; u++) if (usable(u) && offeredAt(n.code, n.offered, u)) return u; return null; };
 
     // defers: not before that term (still only in offered quarters)
     const realSet = new Set(real.map(n => n.code)), notBefore = new Map();
@@ -376,7 +389,7 @@
       const ti = DARS.termIndex(term), n = nodes.get(c);
       if (!todoSet.has(c)) warnings.push(`Ignored your move of ${c}: it is not in the plan.`);
       else if (ti == null || ti <= t0 || !usable(ti)) warnings.push(`Ignored your move of ${c} to ${term}: not a quarter the plan uses.`);
-      else if (!(n.offered === '?' || n.offered.includes(qOf(ti)))) warnings.push(`Ignored your move of ${c} to ${term}: it is not offered in ${{ F: 'Fall', W: 'Winter', S: 'Spring', U: 'Summer' }[qOf(ti)]}.`);
+      else if (!offeredAt(n.code, n.offered, ti)) warnings.push(`Ignored your move of ${c} to ${term}: it is not offered in ${{ F: 'Fall', W: 'Winter', S: 'Spring', U: 'Summer' }[qOf(ti)]}${n.offered.includes(qOf(ti)) ? ` ${term.slice(2)} (not in the Schedule of Classes for that term)` : ''}.`);
       else { PINS.set(c, ti); notBefore.delete(c); }
     }
     // conflicts: a and b can't share `term`. Plan it both ways and keep the course whose move hurts less:
@@ -477,7 +490,7 @@
       delete o.pins[x.code];
       for (let u = t + 1; u <= t + 8; u++) {
         const q = 'FWSU'[u % 4];
-        if ((opts.useSummer || q !== 'U') && (x.offered === '?' || x.offered.includes(q))) { o.defers[x.code] = DARS.termName(u); break; }
+        if ((opts.useSummer || q !== 'U') && offeredAt(x.code, x.offered, u)) { o.defers[x.code] = DARS.termName(u); break; }
       }
     };
     if (change.type === 'defer' && n && n.planned) deferPast(n, n.planned);
@@ -520,7 +533,7 @@
     const moved = new Set((model.conflictResolutions || []).filter(r => r.term === T && r.moved).map(r => r.moved));
     const can = c => {
       const k = COURSES[c], n = nm.get(c), off = k ? k.off : n ? n.offered : '';
-      return !have.has(c) && !(n && n.planned === T) && (off === '?' || off.includes(q)) && !moved.has(c) &&
+      return !have.has(c) && !(n && n.planned === T) && offeredAt(c, off, ti) && !moved.has(c) &&
         !(defers[c] && DARS.termIndex(defers[c]) > ti) && (k ? k.pre : n ? n.prereqs : []).every(grp => grp.some(x => have.has(x)));
     };
     const titleOf = c => (nm.get(c) || {}).title || (COURSES[c] || {}).t || c;
@@ -577,5 +590,5 @@
     const terms = [...new Set(model.nodes.filter(n => n.groupKey === groupKey && n.planned && /^(GE|CHOOSE): /.test(n.code)).map(n => n.planned))];
     return [...new Set(terms.flatMap(t => nextQuarter(model, t, opts).picks.filter(x => x.groupKey === groupKey && x.rec).map(x => x.rec)))];
   }
-  g.MODEL = { build, previewChange, nextQuarter, recommend, gradeFor, seatsFor, setGrades, GRADES };
+  g.MODEL = { build, previewChange, nextQuarter, recommend, gradeFor, seatsFor, offeredAt, setGrades, GRADES };
 })(typeof module !== 'undefined' ? module.exports : window);

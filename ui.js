@@ -213,6 +213,9 @@
   }
 
   // "Title · F/W" for a long-list option: what it is and the quarters it runs
+  // published terms a course usually runs in but is missing from: "not in the Winter 2027 schedule"
+  const unlisted = c => { const k = course(c); return !k ? '' : Object.keys(G.listed || {}).filter(t => k.off.includes(t[2]) && !MODEL.offeredAt(c, k.off, DARS.termIndex({ F: 'FA', W: 'WI', S: 'SP' }[t[2]] + t.slice(0, 2))))
+    .map(t => `not in the ${QTR[t[2]]} 20${t.slice(0, 2)} schedule`).join('; '); };
   const optInfo = c => { const k = course(c); return !k ? 'not in course database' : k.t + (k.off === '' ? ' · not offered recently' : k.off === '?' ? '' : ' · ' + k.off.split('').join('/')); };
   // courses on a slot's list that can be taken in `term`; selecting one plans it for that quarter
   // Grades come live from uclagrades.com (one small JSON per course, any origin may read it) the first time a course is shown in a
@@ -590,7 +593,7 @@
   // dropped in a quarter it isn't offered in: offer the nearest offered quarters, one before and one after
   function offerNearest(code, term) {
     const n = nodeMap()[code], ti = DARS.termIndex(term), t0 = DARS.termIndex(S.model.currentTerm);
-    const okAt = u => (S.opts.useSummer || u % 4 !== 3) && (n.offered === '?' || n.offered.includes('FWSU'[u % 4]));
+    const okAt = u => (S.opts.useSummer || u % 4 !== 3) && MODEL.offeredAt(n.code, n.offered, u);
     let before = null, after = null;
     for (let u = ti - 1; u > t0 && before == null; u--) if (okAt(u)) before = u;
     for (let u = ti + 1; u <= ti + 8 && after == null; u++) if (okAt(u)) after = u;
@@ -618,7 +621,7 @@
         <b>${nm[o.code] ? `<a href="#" data-node="${esc(o.code)}">${esc(o.code)}</a>` : esc(o.code)}</b><span class="muted small">${esc(c.u ?? '?')} u</span>${recs.includes(o.code) ? '<span class="rectag">recommended</span>' : ''}
         <button class="btn sm" data-act="${o.pinned ? 'unselect' : 'select'}" data-key="${esc(g.key)}" data-code="${esc(o.code)}">${o.pinned ? 'Unselect' : 'Select'}</button></div>
         <div class="small">${esc(c.t || 'Not in the course database')}</div>
-        <div class="small muted">Offered: ${esc(offeredText(o.code))}</div>
+        <div class="small muted">Offered: ${esc(offeredText(o.code))}${unlisted(o.code) ? '; ' + esc(unlisted(o.code)) : ''}</div>
         ${pre ? `<ul class="prelist small">${pre}</ul>` : `<div class="small muted">${c.t ? 'No prerequisites' : 'Prerequisites unknown'}</div>`}
         ${c.req ? `<div class="small muted">Catalog: ${esc(c.req)}</div>` : ''}
         ${o.why ? `<div class="small muted">${esc(o.why)}</div>` : ''}${aText(o.code) ? `<div class="small muted">${esc(aText(o.code))}</div>` : ''}</div>`;
@@ -671,7 +674,7 @@
       <dl><dt>Status</dt><dd><i class="badge s-${esc(shown(n))}">${esc(STATUS[shown(n)] || n.status)}</i></dd>
       <dt>Units</dt><dd>${esc(n.units)}</dd>
       ${n.term ? `<dt>${n.enrolled ? 'Enrolled for' : 'Taken'}</dt><dd>${esc(n.term)}</dd>` : ''}${n.planned ? `<dt>Planned</dt><dd>${esc(n.planned)}${n.critical ? ` <span class="crit-t">* ${esc(critText(n))}</span>` : n.slack ? ` <small class="muted">(can slip ${esc(n.slack)}${n.slack >= 4 ? '+' : ''} offered quarter${n.slack === 1 ? '' : 's'})</small>` : ''}</dd>` : ''}
-      <dt>Offered</dt><dd>${esc(off)}</dd>
+      <dt>Offered</dt><dd>${esc(off)}${unlisted(n.code) ? `<br><small class="muted">${esc(unlisted(n.code))}</small>` : ''}</dd>
       ${MODEL.seatsFor(n.code, n.planned) ? `<dt>Seats</dt><dd>${MODEL.seatsFor(n.code, n.planned) === 'full' ? 'Full' : 'Waitlist only'} in ${esc(n.planned)} <small class="muted">as of ${esc(G.asOf)}; check the Schedule of Classes</small></dd>` : ''}
       ${aText(n.code, n.planned) ? `<dt>Grades</dt><dd>${esc(aText(n.code, n.planned).replace(/^A's: /, ''))}<br><small class="muted">share of past letter grades that were A+, A or A-</small></dd>` : ''}
       ${g ? `<dt>Satisfies</dt><dd>${esc(g.name)}<br><small class="muted">${esc(g.section)}</small></dd>` : ''}</dl>
@@ -802,7 +805,7 @@
     if (z.dataset.drop === 'plan') {
       if (d.from === undefined || d.from === term) return;
       const n = nodeMap()[d.code], q = 'FWSU'[DARS.termIndex(term) % 4];
-      return n.offered === '?' || n.offered.includes(q) ? tryChange({ type: 'move', code: d.code, term }) : offerNearest(d.code, term);
+      return MODEL.offeredAt(n.code, n.offered, DARS.termIndex(term)) ? tryChange({ type: 'move', code: d.code, term }) : offerNearest(d.code, term);
     }
     if (d.from !== undefined || d.code === z.dataset.out) return; // "next" zones take alternates only
     const prev = { opts: JSON.parse(JSON.stringify(S.opts)), model: S.model };

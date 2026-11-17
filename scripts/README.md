@@ -12,10 +12,13 @@ node scripts/build-instructors.mjs --term 27W --cache ./instructors-cache
 ```
 
 Plain Node 22, no dependencies. Run it after `build-course-db.mjs`, and again when the Schedule of Classes publishes
-instructors for a new term. About 2,200 requests, 5 minutes cold. Seats change by the hour during enrollment: delete the cache
+instructors for a new term or posts a new term. About 2,500 requests, 6 minutes cold. Seats change by the hour during enrollment: delete the cache
 and rerun whenever you want a fresh snapshot (the file records its date as `asOf`).
 
-- For each subject, the `CourseTitlesView` pages of the term, then one `/Results/GetCourseSummary?model=...` per course (the
+- Every Fall/Winter/Spring term the site's term menu offers from the next term on is read for its course list (`listed`):
+  one set of `CourseTitlesView` pages per subject per term. The planner treats those terms as published: a course runs there
+  only if it is listed.
+- For the next term only: after the `CourseTitlesView` pages, one `/Results/GetCourseSummary?model=...` per course (the
   `model` JSON is in the titles page). Names come as "Keranen, J.P."; "Tentative" and "The Staff" are skipped.
   A term further out than the next one lists only "Tentative".
 - Each section's status column reads "Open ...", "Waitlist ..." or "Closed / Class Full (210)". A course or instructor gets
