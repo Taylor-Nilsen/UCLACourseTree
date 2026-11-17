@@ -7,7 +7,7 @@
 <style>
 :root {
   --bg: #f6f7f9; --card: #fff; --fg: #1b1d21; --muted: #6b7280; --line: #e1e4e8; --accent: #2563eb; --accent-fg: #fff;
-  --done: #16a34a; --done-bg: #dcfce7; --ip: #2563eb; --ip-bg: #dbeafe; --ready: #d97706; --ready-bg: #fffbeb;
+  --done: #5f9e78; --done-bg: #e4efe8; --prog: #0d9488; --prog-bg: #d3f1ed; --ip: #2563eb; --ip-bg: #dbeafe; --ready: #d97706; --ready-bg: #fffbeb;
   --locked: #9ca3af; --locked-bg: #f3f4f6; --ph: #7c3aed; --ph-bg: #f3e8ff; --block: #dc2626; --edge: #c3c8d0;
   --warn-bg: #fef3c7; --warn-fg: #92400e; --err-bg: #fee2e2; --err-fg: #991b1b;
   color-scheme: light;
@@ -15,7 +15,7 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #111317; --card: #1a1d23; --fg: #e6e7ea; --muted: #9aa0aa; --line: #2d3139; --accent: #60a5fa; --accent-fg: #0b1220;
-    --done: #4ade80; --done-bg: #12351f; --ip: #60a5fa; --ip-bg: #132a4a; --ready: #fbbf24; --ready-bg: #2a2110;
+    --done: #6fae87; --done-bg: #1a2e22; --prog: #2dd4bf; --prog-bg: #0f332f; --ip: #60a5fa; --ip-bg: #132a4a; --ready: #fbbf24; --ready-bg: #2a2110;
     --locked: #6b7280; --locked-bg: #22252b; --ph: #c084fc; --ph-bg: #2a1a40; --block: #f87171; --edge: #3d424c;
     --warn-bg: #3a2c0b; --warn-fg: #fcd34d; --err-bg: #3b1515; --err-fg: #fca5a5;
     color-scheme: dark;
@@ -23,7 +23,7 @@
 }
 :root[data-theme="dark"] {
     --bg: #111317; --card: #1a1d23; --fg: #e6e7ea; --muted: #9aa0aa; --line: #2d3139; --accent: #60a5fa; --accent-fg: #0b1220;
-    --done: #4ade80; --done-bg: #12351f; --ip: #60a5fa; --ip-bg: #132a4a; --ready: #fbbf24; --ready-bg: #2a2110;
+    --done: #6fae87; --done-bg: #1a2e22; --prog: #2dd4bf; --prog-bg: #0f332f; --ip: #60a5fa; --ip-bg: #132a4a; --ready: #fbbf24; --ready-bg: #2a2110;
     --locked: #6b7280; --locked-bg: #22252b; --ph: #c084fc; --ph-bg: #2a1a40; --block: #f87171; --edge: #3d424c;
     --warn-bg: #3a2c0b; --warn-fg: #fcd34d; --err-bg: #3b1515; --err-fg: #fca5a5;
     color-scheme: dark;
@@ -115,8 +115,9 @@ button, input { font: inherit; color: inherit; }
 .node .chip { fill: var(--bg); stroke: var(--line); }
 .node .chipt { font-size: 10px; fill: var(--fg); }
 .s-done .box { fill: var(--done-bg); stroke: var(--done); }
-.s-ip .box { fill: var(--ip-bg); stroke: var(--ip); }
-.s-enrolled .box { fill: var(--ip-bg); stroke: var(--ip); stroke-dasharray: 6 3; }
+/* done: muted green; in progress this quarter: blue-green; enrolled for a later quarter: blue */
+.s-ip .box { fill: var(--prog-bg); stroke: var(--prog); }
+.s-enrolled .box { fill: var(--ip-bg); stroke: var(--ip); }
 .node .enr { fill: var(--ip); font-size: 10px; font-weight: 700; }
 .s-ready .box { fill: var(--ready-bg); stroke: var(--ready); stroke-width: 2.5; }
 .node .rdy { fill: var(--ready); font-size: 10px; font-weight: 700; }
@@ -165,8 +166,8 @@ button, input { font: inherit; color: inherit; }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; font-size: 12px; color: var(--muted); }
 .legend i { display: inline-block; width: 14px; height: 10px; border-radius: 3px; border: 1.5px solid; vertical-align: -1px; margin-right: 4px; }
 .legend .s-done { background: var(--done-bg); border-color: var(--done); }
-.legend .s-ip { background: var(--ip-bg); border-color: var(--ip); }
-.legend .s-enrolled { background: var(--ip-bg); border-color: var(--ip); border-style: dashed; }
+.legend .s-ip { background: var(--prog-bg); border-color: var(--prog); }
+.legend .s-enrolled { background: var(--ip-bg); border-color: var(--ip); }
 .legend .s-ready { background: var(--ready-bg); border-color: var(--ready); }
 .legend .s-locked { background: var(--locked-bg); border: 1.5px dashed var(--locked); }
 .legend .s-placeholder { background: var(--ph-bg); border: 1.5px dashed var(--ph); }
@@ -183,7 +184,7 @@ button, input { font: inherit; color: inherit; }
 .pchip { display: block; width: 100%; text-align: left; padding: 6px 8px; margin-bottom: 6px; border: 1px solid var(--line); border-left-width: 4px; border-radius: 6px; background: var(--bg); cursor: pointer; }
 .pchip span { display: block; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pchip small { color: var(--muted); }
-.pchip.s-ready { border-left-color: var(--ready); } .pchip.s-locked { border-left-color: var(--locked); } .pchip.s-placeholder { border-left-color: var(--ph); }
+.pchip.s-enrolled { border-left-color: var(--ip); } .pchip.s-ip { border-left-color: var(--prog); } .pchip.s-ready { border-left-color: var(--ready); } .pchip.s-locked { border-left-color: var(--locked); } .pchip.s-placeholder { border-left-color: var(--ph); }
 .pchip:hover { border-color: var(--accent); }
 .pchip.choose { border: 1.5px dashed var(--ready); border-left-width: 4px; background: var(--ph-bg); color: var(--ph); }
 .pchip.choose b { display: block; font-size: 13px; overflow-wrap: anywhere; }
@@ -251,7 +252,7 @@ button, input { font: inherit; color: inherit; }
 .optd div { margin-top: 2px; } .prelist li { margin-bottom: 4px; }
 .pre { white-space: nowrap; }
 .badge { font-style: normal; font-size: 11px; padding: 1px 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); }
-.badge.s-done { background: var(--done-bg); border-color: var(--done); } .badge.s-ip { background: var(--ip-bg); border-color: var(--ip); } .badge.s-enrolled { background: var(--ip-bg); border-color: var(--ip); border-style: dashed; }
+.badge.s-done { background: var(--done-bg); border-color: var(--done); } .badge.s-ip { background: var(--prog-bg); border-color: var(--prog); } .badge.s-enrolled { background: var(--ip-bg); border-color: var(--ip); }
 .badge.s-ready { border-color: var(--ready); } .badge.s-locked { border-style: dashed; } .badge.s-placeholder { background: var(--ph-bg); border-color: var(--ph); }
 .dismiss { position: absolute; top: 4px; right: 6px; width: 24px; height: 24px; border: 0; border-radius: 6px; background: none; color: inherit; font-size: 18px; line-height: 1; cursor: pointer; opacity: .7; }
 .dismiss:hover, .dismiss:focus-visible { opacity: 1; background: rgba(0,0,0,.08); }
