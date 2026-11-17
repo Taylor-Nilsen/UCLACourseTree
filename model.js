@@ -511,7 +511,9 @@
     if (!T) return { term: null, terms, picks: [] };
     const ti = DARS.termIndex(T), q = 'FWSU'[((ti % 4) + 4) % 4], defers = opts.defers || {};
     const nm = new Map(model.nodes.map(n => [n.code, n])), at = n => n.planned ? DARS.termIndex(n.planned) : null;
-    const have = new Set(model.nodes.filter(n => n.status === 'done' || n.status === 'ip' || at(n) < ti && at(n) != null).map(n => n.code));
+    // what is finished before this quarter starts: done, in progress in an earlier quarter, or planned earlier. A class you are
+    // enrolled in for this very quarter (or a later one) is not a met prerequisite yet.
+    const have = new Set(model.nodes.filter(n => n.status === 'done' || n.status === 'ip' && !(DARS.termIndex(n.term) >= ti) || at(n) < ti && at(n) != null).map(n => n.code));
     const moved = new Set((model.conflictResolutions || []).filter(r => r.term === T && r.moved).map(r => r.moved));
     const can = c => {
       const k = COURSES[c], n = nm.get(c), off = k ? k.off : n ? n.offered : '';

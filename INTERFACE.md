@@ -191,7 +191,7 @@ problems", Undo focused, Esc = Undo, "Continue anyway"). Removing a constraint a
 important first: `critical`, then lowest `slack`, then most `unlocks`, then `priority`; `GE:`/`CHOOSE:` slots last.
 Each pick: `{ code, title, units, critical, slot, why /* "must take now: ..." | "can slip 2 offered quarters; unlocks 3 later courses" */,
 alts: [{ code, title, why, groupKey: string|null, same: boolean }] }`, at most 3, best first. An alternate is offered that quarter, has
-every prereq group met by a done, in-progress or earlier-planned course, is not deferred past the term and was not moved out of
+every prereq group met by a done, in-progress or earlier-planned course (a class enrolled for that same quarter or later is not met yet), is not deferred past the term and was not moved out of
 it by a conflict. Order: options of the same requirement (`same: true`; a course in `pickedFor`'s group, or a non-path `CHOOSE:`
 slot's group), then a pool of later-planned courses (by `priority`), options of undecided selected choice groups, and later
 `GE:` slots. Pool entries go one per `groupKey` per pick, preferring entries shown under fewer earlier picks. A `GE:` slot pick has no alternates.

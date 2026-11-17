@@ -68,7 +68,7 @@ The "What to take next" tab is for course selection. Pick a quarter (it defaults
 2. Then the ones with the least room to slip (fewest offered quarters they can move before graduation is pushed back).
 3. Then the ones that unlock the most later courses.
 
-Under each class are up to 3 alternates for if you can't get it, best on top. Each one can actually be taken that quarter: it is offered then, and its prerequisites are done, in progress or planned earlier. The order is:
+Under each class are up to 3 alternates for if you can't get it, best on top. Each one can actually be taken that quarter: it is offered then, and its prerequisites are done, in progress this quarter or planned earlier. A class you are already enrolled in for that same quarter does not count as a finished prerequisite. The order is:
 
 1. Other options for the same requirement, when you selected that class from a list.
 2. Courses planned for a later quarter that could move up, in the planner's own priority order.

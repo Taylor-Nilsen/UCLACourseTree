@@ -515,4 +515,14 @@ t('seats: a full class is listed last, is never recommended or offered as an alt
   assert.match(mine.why, /full as of 2026-11-17$/); assert.equal(mine.seats, 'full');
   delete G.c['ZZ 10']; delete G.c['ZZ 11']; delete G.c['ZZ 12'];
 });
+t('nextQuarter: a class enrolled for the coming quarter is not a met prerequisite in that same quarter', () => {
+  const p = synth([['A', 1, [zz('ZZ 22')]], ['B', 2, [zz('ZZ 10'), zz('ZZ 11')]]]);
+  p.taken = { 'ZZ 21': { term: 'WI27', units: 4, grade: 'IP', status: 'ip', title: 'ZZ 21' } }; // ZZ 22 needs ZZ 21 and runs in Winter only
+  const mm = MODEL.build(p, { perQuarter: 2 }), codes = t => MODEL.nextQuarter(mm, t).picks.flatMap(x => [x.code, ...x.alts.map(a => a.code)]);
+  assert.deepEqual(mm.plan[0].enrolled, ['ZZ 21']); assert.equal(mm.nodes.find(x => x.code === 'ZZ 22').planned, 'WI28');
+  assert.ok(!codes('WI27').includes('ZZ 22'), codes('WI27').join()); assert.ok(codes('WI28').includes('ZZ 22'));
+  const now = synth([['A', 1, [zz('ZZ 22')]], ['B', 2, [zz('ZZ 10'), zz('ZZ 11')]]]); // in progress this quarter: done by next quarter, so it counts
+  now.taken = { 'ZZ 21': { term: 'FA26', units: 4, grade: 'IP', status: 'ip', title: 'ZZ 21' } };
+  assert.equal(MODEL.build(now, { perQuarter: 1 }).nodes.find(x => x.code === 'ZZ 22').planned, 'WI27');
+});
 console.log(n + ' passed');
